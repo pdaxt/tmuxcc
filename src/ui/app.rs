@@ -268,7 +268,7 @@ async fn run_loop(
                                         }
                                     }
                                 }
-                                state.focus_sidebar();
+                                // Stay in input mode for consecutive inputs
                             }
                             Action::SendNumber(num) => {
                                 if let Some(agent) = state.selected_agent() {
