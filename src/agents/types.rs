@@ -131,7 +131,10 @@ pub enum AgentStatus {
 impl AgentStatus {
     /// Returns true if the agent needs user attention
     pub fn needs_attention(&self) -> bool {
-        matches!(self, AgentStatus::AwaitingApproval { .. } | AgentStatus::Error { .. })
+        matches!(
+            self,
+            AgentStatus::AwaitingApproval { .. } | AgentStatus::Error { .. }
+        )
     }
 
     /// Returns a short status indicator for UI

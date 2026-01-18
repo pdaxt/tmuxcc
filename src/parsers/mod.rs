@@ -18,10 +18,7 @@ pub(crate) fn safe_tail(s: &str, max_chars: usize) -> &str {
         return s;
     }
     let skip = char_count - max_chars;
-    let byte_idx = s.char_indices()
-        .nth(skip)
-        .map(|(idx, _)| idx)
-        .unwrap_or(0);
+    let byte_idx = s.char_indices().nth(skip).map(|(idx, _)| idx).unwrap_or(0);
     &s[byte_idx..]
 }
 

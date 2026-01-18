@@ -9,9 +9,9 @@ impl Layout {
         ratatui::layout::Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),  // Header
-                Constraint::Min(10),    // Content area
-                Constraint::Length(4),  // Footer (2 lines + border)
+                Constraint::Length(3), // Header
+                Constraint::Min(10),   // Content area
+                Constraint::Length(4), // Footer (2 lines + border)
             ])
             .split(area)
             .to_vec()
@@ -31,7 +31,11 @@ impl Layout {
 
     /// Splits the content area with summary, preview, and input
     /// Returns (sidebar, summary, preview, input)
-    pub fn content_layout_with_input(area: Rect, sidebar_width: u16, input_height: u16) -> (Rect, Rect, Rect, Rect) {
+    pub fn content_layout_with_input(
+        area: Rect,
+        sidebar_width: u16,
+        input_height: u16,
+    ) -> (Rect, Rect, Rect, Rect) {
         let columns = ratatui::layout::Layout::default()
             .direction(Direction::Horizontal)
             .constraints([

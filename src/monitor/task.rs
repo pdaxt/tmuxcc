@@ -93,8 +93,28 @@ impl MonitorTask {
                 // Check pane title for spinner (Claude Code specific)
                 // Spinners like ⠐⠇⠋⠙⠸ in title indicate processing
                 let title_has_spinner = pane.title.chars().any(|c| {
-                    matches!(c, '⠿' | '⠇' | '⠋' | '⠙' | '⠸' | '⠴' | '⠦' | '⠧' | '⠖' | '⠏' |
-                                '⠹' | '⠼' | '⠷' | '⠾' | '⠽' | '⠻' | '⠐' | '⠑' | '⠒' | '⠓')
+                    matches!(
+                        c,
+                        '⠿' | '⠇'
+                            | '⠋'
+                            | '⠙'
+                            | '⠸'
+                            | '⠴'
+                            | '⠦'
+                            | '⠧'
+                            | '⠖'
+                            | '⠏'
+                            | '⠹'
+                            | '⠼'
+                            | '⠷'
+                            | '⠾'
+                            | '⠽'
+                            | '⠻'
+                            | '⠐'
+                            | '⠑'
+                            | '⠒'
+                            | '⠓'
+                    )
                 });
 
                 // If title has spinner, override to Processing
@@ -106,7 +126,10 @@ impl MonitorTask {
 
                 // Apply hysteresis: if status is now Idle but was recently active, keep as Processing
                 let now = Instant::now();
-                let is_active = matches!(status, AgentStatus::Processing { .. } | AgentStatus::AwaitingApproval { .. });
+                let is_active = matches!(
+                    status,
+                    AgentStatus::Processing { .. } | AgentStatus::AwaitingApproval { .. }
+                );
 
                 if is_active {
                     // Update last active time

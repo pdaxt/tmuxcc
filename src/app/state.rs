@@ -1,6 +1,6 @@
+use crate::agents::MonitoredAgent;
 use std::collections::HashSet;
 use std::time::Instant;
-use crate::agents::MonitoredAgent;
 
 /// Which panel is currently focused
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -29,10 +29,7 @@ impl AgentTree {
 
     /// Returns the total number of agents (including subagents)
     pub fn total_count(&self) -> usize {
-        self.root_agents
-            .iter()
-            .map(|a| 1 + a.subagents.len())
-            .sum()
+        self.root_agents.iter().map(|a| 1 + a.subagents.len()).sum()
     }
 
     /// Returns the number of active agents (those needing attention)
@@ -378,5 +375,4 @@ mod tests {
         state.select_prev();
         assert_eq!(state.selected_index, 1); // Wraps around
     }
-
 }

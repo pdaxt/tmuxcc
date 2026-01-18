@@ -57,18 +57,20 @@ impl ClaudeCodeSummary {
             if trimmed.starts_with('⏺') {
                 let tool_text = trimmed.trim_start_matches('⏺').trim();
                 // Only keep recent non-completed ones, or limit to last few
-                if !tool_text.contains("completed") && !tool_text.contains("finished")
-                    && recent_tools.len() < 3 {
-                        // Truncate long tool lines (character-based for UTF-8 safety)
-                        let char_count = tool_text.chars().count();
-                        let short = if char_count > 60 {
-                            let truncated: String = tool_text.chars().take(57).collect();
-                            format!("{}...", truncated)
-                        } else {
-                            tool_text.to_string()
-                        };
-                        recent_tools.push(short);
-                    }
+                if !tool_text.contains("completed")
+                    && !tool_text.contains("finished")
+                    && recent_tools.len() < 3
+                {
+                    // Truncate long tool lines (character-based for UTF-8 safety)
+                    let char_count = tool_text.chars().count();
+                    let short = if char_count > 60 {
+                        let truncated: String = tool_text.chars().take(57).collect();
+                        format!("{}...", truncated)
+                    } else {
+                        tool_text.to_string()
+                    };
+                    recent_tools.push(short);
+                }
             }
         }
 
@@ -98,7 +100,12 @@ impl PanePreviewWidget {
             if let Some(activity) = summary.current_activity {
                 styled_lines.push(Line::from(vec![
                     Span::styled("▶ ", Style::default().fg(Color::Yellow)),
-                    Span::styled(activity, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        activity,
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                 ]));
                 styled_lines.push(Line::from(""));
             }
@@ -116,9 +123,12 @@ impl PanePreviewWidget {
 
             // TODOs
             if !summary.todos.is_empty() {
-                styled_lines.push(Line::from(vec![
-                    Span::styled("TODOs:", Style::default().fg(Color::Gray).add_modifier(Modifier::BOLD)),
-                ]));
+                styled_lines.push(Line::from(vec![Span::styled(
+                    "TODOs:",
+                    Style::default()
+                        .fg(Color::Gray)
+                        .add_modifier(Modifier::BOLD),
+                )]));
                 for (completed, text) in summary.todos {
                     let (icon, style) = if completed {
                         ("☑ ", Style::default().fg(Color::DarkGray))
@@ -151,9 +161,10 @@ impl PanePreviewWidget {
                     AgentStatus::Unknown => "...",
                 };
                 if !status_text.is_empty() && styled_lines.is_empty() {
-                    styled_lines.push(Line::from(vec![
-                        Span::styled(status_text, Style::default().fg(Color::Gray)),
-                    ]));
+                    styled_lines.push(Line::from(vec![Span::styled(
+                        status_text,
+                        Style::default().fg(Color::Gray),
+                    )]));
                 }
             }
 
@@ -204,10 +215,7 @@ impl PanePreviewWidget {
 
             (title, content)
         } else {
-            (
-                " Preview ".to_string(),
-                "No agent selected".to_string(),
-            )
+            (" Preview ".to_string(), "No agent selected".to_string())
         };
 
         let block = Block::default()
@@ -248,10 +256,7 @@ impl PanePreviewWidget {
                 } else if line.starts_with("@@") {
                     vec![Span::styled(*line, Style::default().fg(Color::Cyan))]
                 } else if line.contains("[y/n]") || line.contains("[Y/n]") {
-                    vec![Span::styled(
-                        *line,
-                        Style::default().fg(Color::Yellow),
-                    )]
+                    vec![Span::styled(*line, Style::default().fg(Color::Yellow))]
                 } else if line.contains("⚠") || line.contains("Error") || line.contains("error") {
                     vec![Span::styled(*line, Style::default().fg(Color::Red))]
                 } else if line.starts_with("❯") || line.starts_with(">") {

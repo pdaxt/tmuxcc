@@ -19,13 +19,18 @@ impl InputWidget {
         let is_focused = state.is_input_focused();
 
         // Get target agent name
-        let target_name = state.selected_agent()
+        let target_name = state
+            .selected_agent()
             .map(|a| a.abbreviated_path())
             .unwrap_or_else(|| "None".to_string());
 
         let title = format!(" Input → {} ", target_name);
 
-        let border_color = if is_focused { Color::Green } else { Color::DarkGray };
+        let border_color = if is_focused {
+            Color::Green
+        } else {
+            Color::DarkGray
+        };
 
         let block = Block::default()
             .title(title)
@@ -49,10 +54,12 @@ impl InputWidget {
     }
 
     /// Build lines with cursor indicator
-    fn build_lines_with_cursor(buffer: &str, cursor_pos: usize, is_focused: bool) -> Vec<Line<'static>> {
-        let cursor_style = Style::default()
-            .fg(Color::Black)
-            .bg(Color::Green);
+    fn build_lines_with_cursor(
+        buffer: &str,
+        cursor_pos: usize,
+        is_focused: bool,
+    ) -> Vec<Line<'static>> {
+        let cursor_style = Style::default().fg(Color::Black).bg(Color::Green);
         let text_style = Style::default().fg(Color::White);
         let hint_style = Style::default().fg(Color::DarkGray);
 
@@ -60,13 +67,16 @@ impl InputWidget {
             if is_focused {
                 return vec![Line::from(vec![
                     Span::styled("█", cursor_style),
-                    Span::styled(" (Shift+Enter: newline, Enter: send, Esc: back)",
-                        hint_style),
+                    Span::styled(
+                        " (Shift+Enter: newline, Enter: send, Esc: back)",
+                        hint_style,
+                    ),
                 ])];
             } else {
-                return vec![Line::from(vec![
-                    Span::styled("← arrow key to input", hint_style),
-                ])];
+                return vec![Line::from(vec![Span::styled(
+                    "← arrow key to input",
+                    hint_style,
+                )])];
             }
         }
 
@@ -89,9 +99,10 @@ impl InputWidget {
 
         // Process all lines before cursor line
         for line_text in &before_lines[..before_lines.len().saturating_sub(1)] {
-            lines.push(Line::from(vec![
-                Span::styled(line_text.to_string(), text_style),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                line_text.to_string(),
+                text_style,
+            )]));
         }
 
         // Build the cursor line
@@ -120,17 +131,22 @@ impl InputWidget {
             lines.push(Line::from(vec![
                 Span::styled(cursor_line_before.to_string(), text_style),
                 Span::styled(
-                    format!("{}{}", cursor_char.map(|c| c.to_string()).unwrap_or_default(), cursor_line_after_first),
-                    text_style
+                    format!(
+                        "{}{}",
+                        cursor_char.map(|c| c.to_string()).unwrap_or_default(),
+                        cursor_line_after_first
+                    ),
+                    text_style,
                 ),
             ]));
         }
 
         // Process remaining lines after cursor line
         for line_text in &after_lines[1..] {
-            lines.push(Line::from(vec![
-                Span::styled(line_text.to_string(), text_style),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                line_text.to_string(),
+                text_style,
+            )]));
         }
 
         lines

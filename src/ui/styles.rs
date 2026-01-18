@@ -14,9 +14,7 @@ impl Styles {
     }
 
     pub fn awaiting_approval() -> Style {
-        Style::default()
-            .fg(Color::Red)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
     }
 
     pub fn error() -> Style {

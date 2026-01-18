@@ -1,9 +1,9 @@
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::fmt;
 use std::process::Command;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
-use parking_lot::Mutex;
 
 /// Process info stored in cache
 #[derive(Clone, Debug)]
@@ -52,10 +52,13 @@ impl ProcessTreeCache {
                 if let (Ok(pid), Ok(ppid)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
                     let cmd = parts[2].trim().to_string();
                     let parent = if ppid == 0 { None } else { Some(ppid) };
-                    self.processes.insert(pid, ProcessInfo {
-                        command: cmd,
-                        parent_pid: parent,
-                    });
+                    self.processes.insert(
+                        pid,
+                        ProcessInfo {
+                            command: cmd,
+                            parent_pid: parent,
+                        },
+                    );
                 }
             }
         }

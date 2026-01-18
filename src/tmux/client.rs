@@ -54,8 +54,6 @@ impl TmuxClient {
             .filter_map(|line| {
                 // First field is session_attached (0 or 1)
                 let (attached, rest) = line.split_once('\t')?;
-                
-                
 
                 // Only include panes from attached sessions
                 if attached == "1" {
@@ -132,7 +130,11 @@ impl TmuxClient {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("tmux select-window failed for {}: {}", window_target, stderr);
+            anyhow::bail!(
+                "tmux select-window failed for {}: {}",
+                window_target,
+                stderr
+            );
         }
 
         Ok(())

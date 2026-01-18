@@ -4,7 +4,10 @@ use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyModifiers, MouseEventKind, MouseButton, EnableMouseCapture, DisableMouseCapture},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseButton,
+        MouseEventKind,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -13,11 +16,12 @@ use tokio::sync::mpsc;
 
 use crate::app::{Action, AppState, Config};
 use crate::monitor::MonitorTask;
-use crate::tmux::TmuxClient;
 use crate::parsers::ParserRegistry;
+use crate::tmux::TmuxClient;
 
 use super::components::{
-    AgentTreeWidget, FooterWidget, HeaderWidget, HelpWidget, InputWidget, PanePreviewWidget, SubagentLogWidget,
+    AgentTreeWidget, FooterWidget, HeaderWidget, HelpWidget, InputWidget, PanePreviewWidget,
+    SubagentLogWidget,
 };
 use super::Layout;
 
@@ -95,7 +99,8 @@ async fn run_loop(
 
             if state.show_subagent_log {
                 // With subagent log: sidebar | summary+preview+input | subagent_log
-                let (left, preview, subagent_log) = Layout::content_layout_with_log(main_chunks[1], state.sidebar_width);
+                let (left, preview, subagent_log) =
+                    Layout::content_layout_with_log(main_chunks[1], state.sidebar_width);
                 AgentTreeWidget::render(frame, left, state);
 
                 // Split preview area for summary, preview, and input
@@ -114,7 +119,9 @@ async fn run_loop(
             } else {
                 // Normal: sidebar | summary+preview+input
                 let (left, summary, preview, input_area) = Layout::content_layout_with_input(
-                    main_chunks[1], state.sidebar_width, input_height
+                    main_chunks[1],
+                    state.sidebar_width,
+                    input_height,
                 );
                 AgentTreeWidget::render(frame, left, state);
                 PanePreviewWidget::render_summary(frame, summary, state);

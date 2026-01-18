@@ -13,7 +13,12 @@ fn is_version_like(s: &str) -> bool {
     // Version pattern: digits and dots only, at least one dot
     let has_dot = s.contains('.');
     let all_valid = s.chars().all(|c| c.is_ascii_digit() || c == '.');
-    has_dot && all_valid && s.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
+    has_dot
+        && all_valid
+        && s.chars()
+            .next()
+            .map(|c| c.is_ascii_digit())
+            .unwrap_or(false)
 }
 
 /// Parser for Claude Code CLI output
@@ -145,7 +150,10 @@ impl ClaudeCodeParser {
         }
 
         // Generic approval
-        Some((ApprovalType::Other("Pending approval".to_string()), String::new()))
+        Some((
+            ApprovalType::Other("Pending approval".to_string()),
+            String::new(),
+        ))
     }
 
     /// Detect Claude Code's button-style Yes/No approval
@@ -237,9 +245,13 @@ impl ClaudeCodeParser {
             let trimmed = line.trim();
 
             // Skip lines that are clearly not choices (table borders, etc.)
-            if trimmed.starts_with('│') || trimmed.starts_with('├') ||
-               trimmed.starts_with('└') || trimmed.starts_with('┌') ||
-               trimmed.starts_with('─') || trimmed.starts_with('✻') {
+            if trimmed.starts_with('│')
+                || trimmed.starts_with('├')
+                || trimmed.starts_with('└')
+                || trimmed.starts_with('┌')
+                || trimmed.starts_with('─')
+                || trimmed.starts_with('✻')
+            {
                 if !choices.is_empty() {
                     // Non-choice content after we started - reset
                     choices.clear();
@@ -257,7 +269,7 @@ impl ClaudeCodeParser {
                     if num as usize == choices.len() + 1 {
                         // Clean up choice text - remove trailing description markers
                         let label = choice_text
-                            .split('（')  // Japanese parenthesis
+                            .split('（') // Japanese parenthesis
                             .next()
                             .unwrap_or(choice_text)
                             .trim();
@@ -302,7 +314,11 @@ impl ClaudeCodeParser {
                     continue;
                 }
                 // Question usually ends with ? or ？
-                if prev.ends_with('?') || prev.ends_with('？') || prev.contains('?') || prev.contains('？') {
+                if prev.ends_with('?')
+                    || prev.ends_with('？')
+                    || prev.contains('?')
+                    || prev.contains('？')
+                {
                     question = prev.to_string();
                     break;
                 }
@@ -325,7 +341,8 @@ impl ClaudeCodeParser {
     }
 
     fn extract_file_path(&self, content: &str) -> Option<String> {
-        let path_pattern = Regex::new(r"(?m)(?:file|path)[:\s]+([^\s\n]+)|([./][\w/.-]+\.\w+)").ok()?;
+        let path_pattern =
+            Regex::new(r"(?m)(?:file|path)[:\s]+([^\s\n]+)|([./][\w/.-]+\.\w+)").ok()?;
         path_pattern
             .captures(content)
             .and_then(|c| c.get(1).or(c.get(2)))
@@ -333,7 +350,8 @@ impl ClaudeCodeParser {
     }
 
     fn extract_command(&self, content: &str) -> Option<String> {
-        let cmd_pattern = Regex::new(r"(?m)(?:command|run)[:\s]+`([^`]+)`|```(?:bash|sh)?\n([^`]+)```").ok()?;
+        let cmd_pattern =
+            Regex::new(r"(?m)(?:command|run)[:\s]+`([^`]+)`|```(?:bash|sh)?\n([^`]+)```").ok()?;
         cmd_pattern
             .captures(content)
             .and_then(|c| c.get(1).or(c.get(2)))
@@ -411,9 +429,9 @@ impl AgentParser for ClaudeCodeParser {
             let desc = cap.get(2).map(|m| m.as_str()).unwrap_or("");
 
             // Check if we already have this subagent
-            let existing = subagents.iter().any(|s| {
-                s.subagent_type.display_name().to_lowercase() == type_name.to_lowercase()
-            });
+            let existing = subagents
+                .iter()
+                .any(|s| s.subagent_type.display_name().to_lowercase() == type_name.to_lowercase());
 
             if !existing {
                 id_counter += 1;
@@ -429,7 +447,8 @@ impl AgentParser for ClaudeCodeParser {
         for cap in self.task_complete_pattern.captures_iter(content) {
             let type_name = &cap[1];
             for subagent in &mut subagents {
-                if subagent.subagent_type.display_name().to_lowercase() == type_name.to_lowercase() {
+                if subagent.subagent_type.display_name().to_lowercase() == type_name.to_lowercase()
+                {
                     subagent.status = SubagentStatus::Completed;
                 }
             }
@@ -489,7 +508,7 @@ mod tests {
         assert!(!is_version_like("fish"));
         assert!(!is_version_like("node"));
         assert!(!is_version_like(""));
-        assert!(!is_version_like("2"));  // No dot
+        assert!(!is_version_like("2")); // No dot
     }
 
     #[test]
@@ -547,7 +566,10 @@ Do you want to allow this action?
         let status = parser.parse_status(content);
         match status {
             AgentStatus::AwaitingApproval { .. } => {}
-            _ => panic!("Expected AwaitingApproval for Yes/No buttons, got {:?}", status),
+            _ => panic!(
+                "Expected AwaitingApproval for Yes/No buttons, got {:?}",
+                status
+            ),
         }
     }
 
@@ -557,7 +579,11 @@ Do you want to allow this action?
         // Content ending with prompt should be idle
         let content = "Some previous output\n\n❯ ";
         let status = parser.parse_status(content);
-        assert!(matches!(status, AgentStatus::Idle), "Expected Idle, got {:?}", status);
+        assert!(
+            matches!(status, AgentStatus::Idle),
+            "Expected Idle, got {:?}",
+            status
+        );
     }
 
     #[test]
@@ -569,6 +595,10 @@ The answer is Yes or No depending on the context.
 This is just normal text.
 ❯ "#;
         let status = parser.parse_status(content);
-        assert!(matches!(status, AgentStatus::Idle), "Expected Idle (no false positive), got {:?}", status);
+        assert!(
+            matches!(status, AgentStatus::Idle),
+            "Expected Idle (no false positive), got {:?}",
+            status
+        );
     }
 }

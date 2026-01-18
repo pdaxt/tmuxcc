@@ -36,31 +36,66 @@ impl FooterWidget {
 
         // Line 1 buttons
         let btn_approve = " ✓ Yes ";
-        buttons.push((btn_approve, col, col + btn_approve.len() as u16, FooterButton::Approve));
+        buttons.push((
+            btn_approve,
+            col,
+            col + btn_approve.len() as u16,
+            FooterButton::Approve,
+        ));
         col += btn_approve.len() as u16 + 1;
 
         let btn_reject = " ✗ No ";
-        buttons.push((btn_reject, col, col + btn_reject.len() as u16, FooterButton::Reject));
+        buttons.push((
+            btn_reject,
+            col,
+            col + btn_reject.len() as u16,
+            FooterButton::Reject,
+        ));
         col += btn_reject.len() as u16 + 1;
 
         let btn_all = " ⚡All ";
-        buttons.push((btn_all, col, col + btn_all.len() as u16, FooterButton::ApproveAll));
+        buttons.push((
+            btn_all,
+            col,
+            col + btn_all.len() as u16,
+            FooterButton::ApproveAll,
+        ));
         col += btn_all.len() as u16 + 1;
 
         let btn_select = " ☐ Sel ";
-        buttons.push((btn_select, col, col + btn_select.len() as u16, FooterButton::ToggleSelect));
+        buttons.push((
+            btn_select,
+            col,
+            col + btn_select.len() as u16,
+            FooterButton::ToggleSelect,
+        ));
         col += btn_select.len() as u16 + 1;
 
         let btn_focus = " ◎ Focus ";
-        buttons.push((btn_focus, col, col + btn_focus.len() as u16, FooterButton::Focus));
+        buttons.push((
+            btn_focus,
+            col,
+            col + btn_focus.len() as u16,
+            FooterButton::Focus,
+        ));
         col += btn_focus.len() as u16 + 1;
 
         let btn_help = " ? ";
-        buttons.push((btn_help, col, col + btn_help.len() as u16, FooterButton::Help));
+        buttons.push((
+            btn_help,
+            col,
+            col + btn_help.len() as u16,
+            FooterButton::Help,
+        ));
         col += btn_help.len() as u16 + 1;
 
         let btn_quit = " Q ";
-        buttons.push((btn_quit, col, col + btn_quit.len() as u16, FooterButton::Quit));
+        buttons.push((
+            btn_quit,
+            col,
+            col + btn_quit.len() as u16,
+            FooterButton::Quit,
+        ));
 
         buttons
     }
@@ -90,7 +125,9 @@ impl FooterWidget {
 
     pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
         let sep_style = Style::default().fg(Color::DarkGray);
-        let input_style = Style::default().fg(Color::Green).add_modifier(Modifier::BOLD);
+        let input_style = Style::default()
+            .fg(Color::Green)
+            .add_modifier(Modifier::BOLD);
         let btn_style = Style::default().fg(Color::Black).bg(Color::Gray);
         let btn_approve = Style::default().fg(Color::Black).bg(Color::Green);
         let btn_reject = Style::default().fg(Color::Black).bg(Color::Red);
@@ -143,9 +180,10 @@ impl FooterWidget {
                 ));
             }
 
-            let mut line2 = vec![
-                Span::styled(" Mouse: click buttons above │ scroll to navigate │ click agent to select ", text_style),
-            ];
+            let mut line2 = vec![Span::styled(
+                " Mouse: click buttons above │ scroll to navigate │ click agent to select ",
+                text_style,
+            )];
 
             if let Some(error) = &state.last_error {
                 line2.push(Span::styled("│", sep_style));
