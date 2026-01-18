@@ -26,9 +26,6 @@ pub struct ClaudeCodeParser {
     mcp_pattern: Regex,
     general_approval_pattern: Regex,
 
-    // Status patterns
-    thinking_pattern: Regex,
-
     // Subagent patterns
     task_start_pattern: Regex,
     task_running_pattern: Regex,
@@ -60,11 +57,6 @@ impl ClaudeCodeParser {
             ).unwrap(),
             general_approval_pattern: Regex::new(
                 r"(?i)\[y/n\]|\[Y/n\]|\[yes/no\]|\(Y\)es\s*/\s*\(N\)o|Yes\s*/\s*No|y/n|Allow\?|Do you want to (allow|proceed|continue|run|execute)"
-            ).unwrap(),
-
-            // Status patterns
-            thinking_pattern: Regex::new(
-                r"(?i)(Thinking|Processing|Analyzing|Working)"
             ).unwrap(),
 
             // Subagent patterns for Claude Code's Task tool
@@ -377,7 +369,10 @@ impl AgentParser for ClaudeCodeParser {
     }
 
     fn parse_status(&self, content: &str) -> AgentStatus {
-        // Check for approval prompts first (highest priority)
+        // Title-based spinner detection in monitor/task.rs handles Processing state.
+        // Here we only check for approval prompts, otherwise return Idle.
+
+        // Check for approval prompts (highest priority)
         if let Some((approval_type, details)) = self.detect_approval(content) {
             return AgentStatus::AwaitingApproval {
                 approval_type,
@@ -385,154 +380,12 @@ impl AgentParser for ClaudeCodeParser {
             };
         }
 
-        let lines: Vec<&str> = content.lines().collect();
-
-        // Check for active processing indicators BEFORE idle check
-        // Look in the last 20 lines for activity
-        let recent_lines: Vec<&str> = lines.iter().rev().take(20).map(|s| *s).collect();
-        for line in &recent_lines {
-            let trimmed = line.trim();
-
-            // Skip empty lines and separator lines
-            if trimmed.is_empty() || trimmed.chars().all(|c| c == '─' || c == '━' || c == '-') {
-                continue;
-            }
-
-            // Claude Code specific indicators
-
-            // "Churned for Xs" indicates idle state - check first
-            if trimmed.contains("Churned for") || trimmed.contains("Churned:") {
-                return AgentStatus::Idle;
-            }
-
-            // ✽ indicates active processing with status (but not if it's a Churned message)
-            if trimmed.starts_with('✽') {
-                let activity = trimmed.trim_start_matches('✽').trim();
-                // Skip if this is an idle indicator
-                if activity.starts_with("Churned") {
-                    return AgentStatus::Idle;
-                }
-                let short_activity = activity.split('(').next().unwrap_or(activity).trim();
-                return AgentStatus::Processing {
-                    activity: short_activity.chars().take(30).collect(),
-                };
-            }
-
-            // ⏺ indicates tool call - but check if it's a completion message
-            if trimmed.starts_with('⏺') {
-                let msg = trimmed.trim_start_matches('⏺').trim();
-                // Skip completed actions (English and Japanese patterns)
-                let is_completed = msg.contains("completed") || msg.contains("finished")
-                    || msg.contains("ました") || msg.contains("した。")
-                    || msg.contains("saved") || msg.contains("created")
-                    || msg.contains("written") || msg.contains("generated");
-                if !is_completed {
-                    return AgentStatus::Processing {
-                        activity: "Tool running...".to_string(),
-                    };
-                }
-            }
-
-            // · (middle dot) with activity text like "Channelling…"
-            if trimmed.starts_with('·') || trimmed.starts_with('•') {
-                let activity = trimmed.trim_start_matches('·').trim_start_matches('•').trim();
-                if !activity.is_empty() {
-                    return AgentStatus::Processing {
-                        activity: activity.chars().take(30).collect(),
-                    };
-                }
-            }
-
-            // "Running…" indicator
-            if trimmed.contains("Running…") || trimmed.contains("Running...") {
-                return AgentStatus::Processing {
-                    activity: "Running...".to_string(),
-                };
-            }
-
-            // Active spinners (braille patterns used by Claude Code)
-            if trimmed.contains('⠿') || trimmed.contains('⠇') || trimmed.contains('⠋') ||
-               trimmed.contains('⠙') || trimmed.contains('⠸') || trimmed.contains('⠴') ||
-               trimmed.contains('⠦') || trimmed.contains('⠧') || trimmed.contains('⠖') ||
-               trimmed.contains('⠏') || trimmed.contains('⠹') || trimmed.contains('⠼') ||
-               trimmed.contains('⠷') || trimmed.contains('⠾') || trimmed.contains('⠐') ||
-               trimmed.contains('⠽') || trimmed.contains('⠻') {
-                return AgentStatus::Processing {
-                    activity: "Processing...".to_string(),
-                };
-            }
-
-            // Other progress indicators
-            if trimmed.contains('◐') || trimmed.contains('◑') ||
-               trimmed.contains('◒') || trimmed.contains('◓') ||
-               trimmed.contains('⏳') {
-                return AgentStatus::Processing {
-                    activity: "Processing...".to_string(),
-                };
-            }
-
-            // Activity text patterns (Claude Code shows these during work)
-            let lower = trimmed.to_lowercase();
-            if lower.contains("channelling") || lower.contains("channeling") ||
-               lower.starts_with("streaming") || lower.starts_with("sending") ||
-               lower.starts_with("reading") || lower.starts_with("writing") ||
-               lower.starts_with("searching") || lower.starts_with("analyzing") ||
-               lower.starts_with("executing") || lower.starts_with("loading") ||
-               lower.starts_with("fetching") || lower.starts_with("compiling") {
-                return AgentStatus::Processing {
-                    activity: trimmed.chars().take(30).collect::<String>(),
-                };
-            }
+        // Default to Idle - title spinner detection will override to Processing if needed
+        if content.trim().is_empty() {
+            AgentStatus::Unknown
+        } else {
+            AgentStatus::Idle
         }
-
-        // Check for tool usage indicators in last few lines (active work)
-        let last_5_lines = lines.iter().rev().take(5).map(|s| *s).collect::<Vec<_>>().join("\n");
-        if last_5_lines.contains("Read(") || last_5_lines.contains("Write(") ||
-           last_5_lines.contains("Edit(") || last_5_lines.contains("Bash(") ||
-           last_5_lines.contains("Glob(") || last_5_lines.contains("Grep(") ||
-           last_5_lines.contains("Task(") || last_5_lines.contains("TodoWrite(") ||
-           last_5_lines.contains("WebFetch(") || last_5_lines.contains("WebSearch(") {
-            return AgentStatus::Processing {
-                activity: "Using tools...".to_string(),
-            };
-        }
-
-        // Check for thinking/processing keywords in recent content
-        let last_3_lines = lines.iter().rev().take(3).map(|s| *s).collect::<Vec<_>>().join("\n");
-        if self.thinking_pattern.is_match(&last_3_lines) {
-            return AgentStatus::Processing {
-                activity: "Thinking...".to_string(),
-            };
-        }
-
-        // NOW check if the last non-empty line is a prompt (indicating idle)
-        // Claude Code shows ❯ when waiting for input, but ONLY if it's truly the end
-        let last_non_empty = lines.iter().rev()
-            .filter(|l| {
-                let t = l.trim();
-                !t.is_empty() &&
-                !t.chars().all(|c| c == '─' || c == '━' || c == '-') &&
-                !t.contains("⏵⏵") &&
-                !t.contains("accept edits") &&
-                !t.contains("shift+tab")
-            })
-            .next();
-
-        if let Some(line) = last_non_empty {
-            let trimmed = line.trim();
-            // Prompt characters indicating idle state
-            // Must be ONLY the prompt character, truly at the end
-            if trimmed == "❯" || trimmed == ">" {
-                return AgentStatus::Idle;
-            }
-        }
-
-        // Default to Idle if we have content but can't determine state
-        if !content.trim().is_empty() {
-            return AgentStatus::Idle;
-        }
-
-        AgentStatus::Unknown
     }
 
     fn parse_subagents(&self, content: &str) -> Vec<Subagent> {
