@@ -78,6 +78,9 @@ async fn run_loop(
     tmux_client: &TmuxClient,
 ) -> Result<()> {
     loop {
+        // Advance animation tick
+        state.tick();
+
         // Draw UI
         terminal.draw(|frame| {
             let size = frame.area();

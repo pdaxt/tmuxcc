@@ -138,7 +138,7 @@ impl AgentTreeWidget {
                     // Status indicator and text
                     let (status_char, status_text, status_style) = match &agent.status {
                         AgentStatus::Idle => ("●", "Idle", Style::default().fg(Color::Green)),
-                        AgentStatus::Processing { .. } => ("◐", "Working", Style::default().fg(Color::Yellow)),
+                        AgentStatus::Processing { .. } => (state.spinner_frame(), "Working", Style::default().fg(Color::Yellow)),
                         AgentStatus::AwaitingApproval { .. } => (
                             "⚠",
                             "Waiting",
@@ -261,7 +261,7 @@ impl AgentTreeWidget {
                                 let activity_line = Line::from(vec![
                                     Span::raw("  "),
                                     Span::styled(format!("{}│  ", cont_prefix), Style::default().fg(Color::DarkGray)),
-                                    Span::styled("◐ ", Style::default().fg(Color::Yellow)),
+                                    Span::styled(format!("{} ", state.spinner_frame()), Style::default().fg(Color::Yellow)),
                                     Span::styled(activity_text, Style::default().fg(Color::Yellow)),
                                 ]);
                                 items.push(ListItem::new(activity_line).style(item_style));
@@ -286,7 +286,7 @@ impl AgentTreeWidget {
                         let sub_branch = if is_last_sub { "└─" } else { "├─" };
 
                         let (sub_char, sub_style) = match subagent.status {
-                            SubagentStatus::Running => ("▶", Style::default().fg(Color::Cyan)),
+                            SubagentStatus::Running => (state.spinner_frame(), Style::default().fg(Color::Cyan)),
                             SubagentStatus::Completed => ("✓", Style::default().fg(Color::Green)),
                             SubagentStatus::Failed => ("✗", Style::default().fg(Color::Red)),
                             SubagentStatus::Unknown => ("?", Style::default().fg(Color::DarkGray)),

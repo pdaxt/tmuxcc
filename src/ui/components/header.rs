@@ -26,7 +26,7 @@ impl HeaderWidget {
         // Processing count
         if processing > 0 {
             spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
-            spans.push(Span::styled(format!(" ◐ {} working ", processing), Style::default().fg(Color::Yellow)));
+            spans.push(Span::styled(format!(" {} {} working ", state.spinner_frame(), processing), Style::default().fg(Color::Yellow)));
         }
 
         // Pending count

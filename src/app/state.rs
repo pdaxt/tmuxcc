@@ -72,6 +72,9 @@ impl AgentTree {
     }
 }
 
+/// Spinner frames for animation
+const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
 /// Main application state
 #[derive(Debug)]
 pub struct AppState {
@@ -97,6 +100,8 @@ pub struct AppState {
     pub last_error: Option<String>,
     /// Sidebar width in percentage (15-70)
     pub sidebar_width: u16,
+    /// Animation tick counter
+    pub tick: usize,
 }
 
 impl AppState {
@@ -114,7 +119,18 @@ impl AppState {
             should_quit: false,
             last_error: None,
             sidebar_width: 35,
+            tick: 0,
         }
+    }
+
+    /// Advance the animation tick
+    pub fn tick(&mut self) {
+        self.tick = self.tick.wrapping_add(1);
+    }
+
+    /// Get the current spinner frame
+    pub fn spinner_frame(&self) -> &'static str {
+        SPINNER_FRAMES[self.tick % SPINNER_FRAMES.len()]
     }
 
     /// Check if input panel is focused
