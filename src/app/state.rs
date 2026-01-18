@@ -1,19 +1,14 @@
 use std::collections::HashSet;
 use crate::agents::MonitoredAgent;
 
-/// Input mode for the application
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum InputMode {
-    /// Normal navigation mode
+/// Which panel is currently focused
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FocusedPanel {
+    /// Agent list sidebar is focused
     #[default]
-    Normal,
-    /// Text input mode (for sending custom input to agents)
-    Input {
-        /// Current input buffer
-        buffer: String,
-        /// Target agent index
-        target_index: usize,
-    },
+    Sidebar,
+    /// Input area is focused
+    Input,
 }
 
 /// Tree structure containing all monitored agents
@@ -77,8 +72,10 @@ pub struct AppState {
     pub selected_index: usize,
     /// Multi-selected agent indices
     pub selected_agents: HashSet<usize>,
-    /// Current input mode
-    pub input_mode: InputMode,
+    /// Which panel is focused
+    pub focused_panel: FocusedPanel,
+    /// Input buffer (always available)
+    pub input_buffer: String,
     /// Whether help is being shown
     pub show_help: bool,
     /// Whether subagent log is shown
@@ -98,7 +95,8 @@ impl AppState {
             agents: AgentTree::new(),
             selected_index: 0,
             selected_agents: HashSet::new(),
-            input_mode: InputMode::Normal,
+            focused_panel: FocusedPanel::Sidebar,
+            input_buffer: String::new(),
             show_help: false,
             show_subagent_log: false,
             should_quit: false,
@@ -107,55 +105,52 @@ impl AppState {
         }
     }
 
-    /// Check if in input mode
-    pub fn is_input_mode(&self) -> bool {
-        matches!(self.input_mode, InputMode::Input { .. })
+    /// Check if input panel is focused
+    pub fn is_input_focused(&self) -> bool {
+        self.focused_panel == FocusedPanel::Input
     }
 
-    /// Enter input mode for the current agent
-    pub fn enter_input_mode(&mut self) {
-        self.input_mode = InputMode::Input {
-            buffer: String::new(),
-            target_index: self.selected_index,
+    /// Focus on the input panel
+    pub fn focus_input(&mut self) {
+        self.focused_panel = FocusedPanel::Input;
+    }
+
+    /// Focus on the sidebar
+    pub fn focus_sidebar(&mut self) {
+        self.focused_panel = FocusedPanel::Sidebar;
+    }
+
+    /// Toggle focus between panels
+    pub fn toggle_focus(&mut self) {
+        self.focused_panel = match self.focused_panel {
+            FocusedPanel::Sidebar => FocusedPanel::Input,
+            FocusedPanel::Input => FocusedPanel::Sidebar,
         };
-    }
-
-    /// Exit input mode without sending
-    pub fn exit_input_mode(&mut self) {
-        self.input_mode = InputMode::Normal;
     }
 
     /// Add a character to the input buffer
     pub fn input_char(&mut self, c: char) {
-        if let InputMode::Input { buffer, .. } = &mut self.input_mode {
-            buffer.push(c);
-        }
+        self.input_buffer.push(c);
+    }
+
+    /// Add a newline to the input buffer
+    pub fn input_newline(&mut self) {
+        self.input_buffer.push('\n');
     }
 
     /// Delete the last character from the input buffer
     pub fn input_backspace(&mut self) {
-        if let InputMode::Input { buffer, .. } = &mut self.input_mode {
-            buffer.pop();
-        }
+        self.input_buffer.pop();
     }
 
-    /// Get the current input buffer and target
-    pub fn get_input(&self) -> Option<(&str, usize)> {
-        if let InputMode::Input { buffer, target_index } = &self.input_mode {
-            Some((buffer.as_str(), *target_index))
-        } else {
-            None
-        }
+    /// Get the current input buffer
+    pub fn get_input(&self) -> &str {
+        &self.input_buffer
     }
 
-    /// Take the input buffer (consumes and returns it)
-    pub fn take_input(&mut self) -> Option<(String, usize)> {
-        if let InputMode::Input { buffer, target_index } = std::mem::take(&mut self.input_mode) {
-            self.input_mode = InputMode::Normal;
-            Some((buffer, target_index))
-        } else {
-            None
-        }
+    /// Take and clear the input buffer
+    pub fn take_input(&mut self) -> String {
+        std::mem::take(&mut self.input_buffer)
     }
 
     /// Returns the currently selected agent

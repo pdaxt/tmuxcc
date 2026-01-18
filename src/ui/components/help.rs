@@ -76,8 +76,8 @@ impl HelpWidget {
                 Span::styled("Send number choice to agent", desc_style),
             ]),
             Line::from(vec![
-                Span::styled("  i / I    ", key_style),
-                Span::styled("Enter input mode (free text)", desc_style),
+                Span::styled("  ← / →    ", key_style),
+                Span::styled("Switch focus (Sidebar / Input)", desc_style),
             ]),
             Line::from(vec![
                 Span::styled("  f / F    ", key_style),

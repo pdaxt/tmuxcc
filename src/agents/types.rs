@@ -1,4 +1,5 @@
 use std::fmt;
+use std::time::Instant;
 
 use super::subagent::Subagent;
 
@@ -197,6 +198,12 @@ pub struct MonitoredAgent {
     pub last_content: String,
     /// Process ID
     pub pid: u32,
+    /// When this agent was first detected
+    pub started_at: Instant,
+    /// When the pane content was last updated
+    pub last_updated: Instant,
+    /// Context remaining percentage (0-100), if detectable
+    pub context_remaining: Option<u8>,
 }
 
 impl MonitoredAgent {
@@ -212,6 +219,7 @@ impl MonitoredAgent {
         agent_type: AgentType,
         pid: u32,
     ) -> Self {
+        let now = Instant::now();
         Self {
             id,
             target,
@@ -225,7 +233,44 @@ impl MonitoredAgent {
             subagents: Vec::new(),
             last_content: String::new(),
             pid,
+            started_at: now,
+            last_updated: now,
+            context_remaining: None,
         }
+    }
+
+    /// Returns the duration since this agent was first detected
+    pub fn uptime(&self) -> std::time::Duration {
+        self.started_at.elapsed()
+    }
+
+    /// Returns a human-readable uptime string
+    pub fn uptime_str(&self) -> String {
+        let secs = self.uptime().as_secs();
+        if secs < 60 {
+            format!("{}s", secs)
+        } else if secs < 3600 {
+            format!("{}m", secs / 60)
+        } else {
+            format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
+        }
+    }
+
+    /// Returns a human-readable last updated string
+    pub fn last_updated_str(&self) -> String {
+        let secs = self.last_updated.elapsed().as_secs();
+        if secs < 5 {
+            "now".to_string()
+        } else if secs < 60 {
+            format!("{}s ago", secs)
+        } else {
+            format!("{}m ago", secs / 60)
+        }
+    }
+
+    /// Updates the last_updated timestamp
+    pub fn touch(&mut self) {
+        self.last_updated = Instant::now();
     }
 
     /// Returns a short path (last component or abbreviated)

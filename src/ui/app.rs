@@ -17,7 +17,7 @@ use crate::tmux::TmuxClient;
 use crate::parsers::ParserRegistry;
 
 use super::components::{
-    AgentTreeWidget, FooterWidget, HelpWidget, PanePreviewWidget, SubagentLogWidget,
+    AgentTreeWidget, FooterWidget, HelpWidget, InputWidget, PanePreviewWidget, SubagentLogWidget,
 };
 use super::Layout;
 
@@ -83,16 +83,36 @@ async fn run_loop(
             let size = frame.area();
             let main_chunks = Layout::main_layout(size);
 
-            // Content area - 2 column layout
+            // Always show input widget at bottom of right column
+            let input_height = InputWidget::calculate_height(state.get_input(), 6);
+
             if state.show_subagent_log {
+                // With subagent log: sidebar | summary+preview+input | subagent_log
                 let (left, preview, subagent_log) = Layout::content_layout_with_log(main_chunks[0], state.sidebar_width);
                 AgentTreeWidget::render(frame, left, state);
-                PanePreviewWidget::render_detailed(frame, preview, state);
+
+                // Split preview area for summary, preview, and input
+                let preview_chunks = ratatui::layout::Layout::default()
+                    .direction(ratatui::layout::Direction::Vertical)
+                    .constraints([
+                        ratatui::layout::Constraint::Length(10),
+                        ratatui::layout::Constraint::Min(5),
+                        ratatui::layout::Constraint::Length(input_height + 2),
+                    ])
+                    .split(preview);
+                PanePreviewWidget::render_summary(frame, preview_chunks[0], state);
+                PanePreviewWidget::render_detailed(frame, preview_chunks[1], state);
+                InputWidget::render(frame, preview_chunks[2], state);
                 SubagentLogWidget::render(frame, subagent_log, state);
             } else {
-                let (left, right) = Layout::content_layout(main_chunks[0], state.sidebar_width);
+                // Normal: sidebar | summary+preview+input
+                let (left, summary, preview, input_area) = Layout::content_layout_with_input(
+                    main_chunks[0], state.sidebar_width, input_height
+                );
                 AgentTreeWidget::render(frame, left, state);
-                PanePreviewWidget::render_detailed(frame, right, state);
+                PanePreviewWidget::render_summary(frame, summary, state);
+                PanePreviewWidget::render_detailed(frame, preview, state);
+                InputWidget::render(frame, input_area, state);
             }
 
             // Footer
@@ -217,21 +237,28 @@ async fn run_loop(
                             Action::HideHelp => {
                                 state.show_help = false;
                             }
-                            Action::EnterInputMode => {
-                                state.enter_input_mode();
+                            Action::FocusInput => {
+                                state.focus_input();
                             }
-                            Action::CancelInput => {
-                                state.exit_input_mode();
+                            Action::FocusSidebar => {
+                                state.focus_sidebar();
+                            }
+                            Action::ClearInput => {
+                                state.take_input();
                             }
                             Action::InputChar(c) => {
                                 state.input_char(c);
+                            }
+                            Action::InputNewline => {
+                                state.input_newline();
                             }
                             Action::InputBackspace => {
                                 state.input_backspace();
                             }
                             Action::SendInput => {
-                                if let Some((input, target_idx)) = state.take_input() {
-                                    if let Some(agent) = state.agents.get_agent(target_idx) {
+                                let input = state.take_input();
+                                if !input.is_empty() {
+                                    if let Some(agent) = state.selected_agent() {
                                         let target = agent.target.clone();
                                         // Send the input text
                                         if let Err(e) = tmux_client.send_keys(&target, &input) {
@@ -241,6 +268,7 @@ async fn run_loop(
                                         }
                                     }
                                 }
+                                state.focus_sidebar();
                             }
                             Action::SendNumber(num) => {
                                 if let Some(agent) = state.selected_agent() {
@@ -280,10 +308,14 @@ fn map_key_to_action(code: KeyCode, modifiers: KeyModifiers, state: &AppState) -
         return Action::HideHelp;
     }
 
-    // If in input mode, handle input-specific keys
-    if state.is_input_mode() {
+    // If input panel is focused, handle input-specific keys
+    if state.is_input_focused() {
         return match code {
-            KeyCode::Esc => Action::CancelInput,
+            // Esc moves focus back to sidebar
+            KeyCode::Esc => Action::FocusSidebar,
+            // Shift+Enter or Alt+Enter inserts newline
+            KeyCode::Enter if modifiers.contains(KeyModifiers::SHIFT) => Action::InputNewline,
+            KeyCode::Enter if modifiers.contains(KeyModifiers::ALT) => Action::InputNewline,
             KeyCode::Enter => Action::SendInput,
             KeyCode::Backspace => Action::InputBackspace,
             KeyCode::Char(c) => Action::InputChar(c),
@@ -291,6 +323,7 @@ fn map_key_to_action(code: KeyCode, modifiers: KeyModifiers, state: &AppState) -
         };
     }
 
+    // Sidebar focused
     match code {
         KeyCode::Char('q') => Action::Quit,
         KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => Action::Quit,
@@ -298,6 +331,10 @@ fn map_key_to_action(code: KeyCode, modifiers: KeyModifiers, state: &AppState) -
         KeyCode::Char('j') | KeyCode::Down => Action::NextAgent,
         KeyCode::Char('k') | KeyCode::Up => Action::PrevAgent,
         KeyCode::Tab => Action::NextAgent,
+
+        // Left/Right arrows for focus navigation
+        KeyCode::Right => Action::FocusInput,
+        KeyCode::Left => Action::None, // Already on sidebar
 
         // Multi-selection
         KeyCode::Char(' ') => Action::ToggleSelection,
@@ -317,15 +354,12 @@ fn map_key_to_action(code: KeyCode, modifiers: KeyModifiers, state: &AppState) -
         // Focus pane with 'f'
         KeyCode::Char('f') | KeyCode::Char('F') => Action::FocusPane,
 
-        // Enter input mode with 'i'
-        KeyCode::Char('i') | KeyCode::Char('I') => Action::EnterInputMode,
-
         KeyCode::Char('s') | KeyCode::Char('S') => Action::ToggleSubagentLog,
         KeyCode::Char('r') => Action::Refresh,
 
-        // Sidebar resize
-        KeyCode::Char('<') | KeyCode::Left => Action::SidebarNarrower,
-        KeyCode::Char('>') | KeyCode::Right => Action::SidebarWider,
+        // Sidebar resize (only < and >)
+        KeyCode::Char('<') => Action::SidebarNarrower,
+        KeyCode::Char('>') => Action::SidebarWider,
 
         KeyCode::Char('h') | KeyCode::Char('?') => Action::ShowHelp,
 

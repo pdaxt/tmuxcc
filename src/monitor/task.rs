@@ -1,13 +1,17 @@
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc;
 use tracing::{debug, error, warn};
 
-use crate::agents::MonitoredAgent;
+use crate::agents::{AgentStatus, MonitoredAgent};
 use crate::app::AgentTree;
 use crate::parsers::ParserRegistry;
 use crate::tmux::{refresh_process_cache, TmuxClient};
+
+/// Hysteresis duration - keep "Processing" status for this long after last active detection
+const STATUS_HYSTERESIS_MS: u64 = 2000;
 
 /// Update message sent from monitor to UI
 #[derive(Debug, Clone)]
@@ -21,6 +25,9 @@ pub struct MonitorTask {
     parser_registry: Arc<ParserRegistry>,
     tx: mpsc::Sender<MonitorUpdate>,
     poll_interval: Duration,
+    /// Track when each agent was last seen as "active" (Processing/AwaitingApproval)
+    /// Key: agent target string
+    last_active: HashMap<String, Instant>,
 }
 
 impl MonitorTask {
@@ -35,11 +42,12 @@ impl MonitorTask {
             parser_registry,
             tx,
             poll_interval,
+            last_active: HashMap::new(),
         }
     }
 
     /// Runs the monitoring loop
-    pub async fn run(&self) {
+    pub async fn run(mut self) {
         loop {
             match self.poll_agents().await {
                 Ok(tree) => {
@@ -58,7 +66,7 @@ impl MonitorTask {
         }
     }
 
-    async fn poll_agents(&self) -> anyhow::Result<AgentTree> {
+    async fn poll_agents(&mut self) -> anyhow::Result<AgentTree> {
         // Refresh process cache once per poll cycle (much faster than per-pane)
         refresh_process_cache();
 
@@ -79,11 +87,47 @@ impl MonitorTask {
                     }
                 };
 
-                // Parse status
-                let status = parser.parse_status(&content);
+                // Parse status from content
+                let mut status = parser.parse_status(&content);
+
+                // Check pane title for spinner (Claude Code specific)
+                // Spinners like ⠐⠇⠋⠙⠸ in title indicate processing
+                let title_has_spinner = pane.title.chars().any(|c| {
+                    matches!(c, '⠿' | '⠇' | '⠋' | '⠙' | '⠸' | '⠴' | '⠦' | '⠧' | '⠖' | '⠏' |
+                                '⠹' | '⠼' | '⠷' | '⠾' | '⠽' | '⠻' | '⠐' | '⠑' | '⠒' | '⠓')
+                });
+
+                // If title has spinner, override to Processing
+                if title_has_spinner && matches!(status, AgentStatus::Idle | AgentStatus::Unknown) {
+                    status = AgentStatus::Processing {
+                        activity: "Working...".to_string(),
+                    };
+                }
+
+                // Apply hysteresis: if status is now Idle but was recently active, keep as Processing
+                let now = Instant::now();
+                let is_active = matches!(status, AgentStatus::Processing { .. } | AgentStatus::AwaitingApproval { .. });
+
+                if is_active {
+                    // Update last active time
+                    self.last_active.insert(target.clone(), now);
+                } else if matches!(status, AgentStatus::Idle) {
+                    // Check if we were recently active
+                    if let Some(last) = self.last_active.get(&target) {
+                        if now.duration_since(*last) < Duration::from_millis(STATUS_HYSTERESIS_MS) {
+                            // Keep as Processing to avoid flicker
+                            status = AgentStatus::Processing {
+                                activity: "Working...".to_string(),
+                            };
+                        }
+                    }
+                }
 
                 // Parse subagents
                 let subagents = parser.parse_subagents(&content);
+
+                // Parse context remaining
+                let context_remaining = parser.parse_context_remaining(&content);
 
                 // Create monitored agent
                 let mut agent = MonitoredAgent::new(
@@ -100,6 +144,8 @@ impl MonitorTask {
                 agent.status = status;
                 agent.subagents = subagents;
                 agent.last_content = content;
+                agent.context_remaining = context_remaining;
+                agent.touch(); // Update last_updated
 
                 tree.root_agents.push(agent);
             }

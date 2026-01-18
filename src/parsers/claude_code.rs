@@ -28,47 +28,43 @@ pub struct ClaudeCodeParser {
 
     // Status patterns
     thinking_pattern: Regex,
-    tool_use_pattern: Regex,
-    idle_pattern: Regex,
 
     // Subagent patterns
     task_start_pattern: Regex,
     task_running_pattern: Regex,
     task_complete_pattern: Regex,
+
+    // Context remaining pattern
+    context_pattern: Regex,
 }
 
 impl ClaudeCodeParser {
     pub fn new() -> Self {
         Self {
             // Approval patterns - detect pending approval prompts
+            // Claude Code uses formats like: "Yes / No", "(Y)es / (N)o", "[y/n]", "y/n"
             file_edit_pattern: Regex::new(
-                r"(?i)(Edit|Write|Modify)\s+.*?\?.*?\[y/n\]|Do you want to (edit|write|modify)"
+                r"(?i)(Edit|Write|Modify)\s+.*?\?|Do you want to (edit|write|modify)|Allow.*?edit"
             ).unwrap(),
             file_create_pattern: Regex::new(
-                r"(?i)Create\s+.*?\?.*?\[y/n\]|Do you want to create"
+                r"(?i)Create\s+.*?\?|Do you want to create|Allow.*?create"
             ).unwrap(),
             file_delete_pattern: Regex::new(
-                r"(?i)Delete\s+.*?\?.*?\[y/n\]|Do you want to delete"
+                r"(?i)Delete\s+.*?\?|Do you want to delete|Allow.*?delete"
             ).unwrap(),
             bash_pattern: Regex::new(
-                r"(?i)(Run|Execute)\s+(command|bash|shell).*?\[y/n\]|Do you want to run"
+                r"(?i)(Run|Execute)\s+(command|bash|shell)|Do you want to run|Allow.*?(command|bash)|run this command"
             ).unwrap(),
             mcp_pattern: Regex::new(
-                r"(?i)MCP\s+tool.*?\[y/n\]|Do you want to use.*?MCP"
+                r"(?i)MCP\s+tool|Do you want to use.*?MCP|Allow.*?MCP"
             ).unwrap(),
             general_approval_pattern: Regex::new(
-                r"\[y/n\]|\[Y/n\]|\[yes/no\]"
+                r"(?i)\[y/n\]|\[Y/n\]|\[yes/no\]|\(Y\)es\s*/\s*\(N\)o|Yes\s*/\s*No|y/n|Allow\?|Do you want to (allow|proceed|continue|run|execute)"
             ).unwrap(),
 
             // Status patterns
             thinking_pattern: Regex::new(
                 r"(?i)(Thinking|Processing|Analyzing|Working)"
-            ).unwrap(),
-            tool_use_pattern: Regex::new(
-                r"(?i)(Using|Calling|Invoking)\s+(tool|function)|Tool:|Read|Write|Edit|Bash|Glob|Grep"
-            ).unwrap(),
-            idle_pattern: Regex::new(
-                r"(?i)Ready|Waiting for input|>\s*$"
             ).unwrap(),
 
             // Subagent patterns for Claude Code's Task tool
@@ -84,55 +80,131 @@ impl ClaudeCodeParser {
             task_complete_pattern: Regex::new(
                 r"(?m)[✓✔]\s*(\w+).*?(?:completed|finished|done|returned)"
             ).unwrap(),
+
+            // Context remaining pattern (e.g., "Context left until auto-compact: 42%")
+            context_pattern: Regex::new(
+                r"(?i)Context\s+(?:left|remaining).*?(\d+)%"
+            ).unwrap(),
         }
     }
 
     fn detect_approval(&self, content: &str) -> Option<(ApprovalType, String)> {
-        // Only check the last portion of content for pending approvals
-        let recent = safe_tail(content, 2000);
+        let lines: Vec<&str> = content.lines().collect();
+        if lines.is_empty() {
+            return None;
+        }
+
+        // Check the last ~20 lines for active approval prompts
+        let check_start = lines.len().saturating_sub(20);
+        let recent_lines = &lines[check_start..];
+        let recent = recent_lines.join("\n");
 
         // Check for user question with choices first (AskUserQuestion)
-        if let Some((choices, question)) = self.extract_user_question(recent) {
+        if let Some((choices, question)) = self.extract_user_question(&recent) {
             if !choices.is_empty() {
                 return Some((
                     ApprovalType::UserQuestion {
                         choices,
-                        multi_select: false, // Could detect from prompt
+                        multi_select: false,
                     },
                     question,
                 ));
             }
         }
 
-        if self.file_edit_pattern.is_match(recent) {
-            let details = self.extract_file_path(recent).unwrap_or_default();
+        // Check for Claude Code's button-style approval (Yes / Yes, and... / No on separate lines)
+        let has_yes_no_buttons = self.detect_yes_no_buttons(recent_lines);
+
+        // Check if there's an active Yes/No prompt in the last few lines (text format)
+        let last_lines: Vec<&str> = recent_lines.iter().rev().take(10).copied().collect();
+        let last_text = last_lines.join("\n");
+        let has_text_approval = self.general_approval_pattern.is_match(&last_text);
+
+        if !has_yes_no_buttons && !has_text_approval {
+            return None;
+        }
+
+        // Now determine the type of approval
+        // Look in a slightly larger context for the type
+        let context = safe_tail(content, 1500);
+
+        if self.file_edit_pattern.is_match(context) {
+            let details = self.extract_file_path(context).unwrap_or_default();
             return Some((ApprovalType::FileEdit, details));
         }
 
-        if self.file_create_pattern.is_match(recent) {
-            let details = self.extract_file_path(recent).unwrap_or_default();
+        if self.file_create_pattern.is_match(context) {
+            let details = self.extract_file_path(context).unwrap_or_default();
             return Some((ApprovalType::FileCreate, details));
         }
 
-        if self.file_delete_pattern.is_match(recent) {
-            let details = self.extract_file_path(recent).unwrap_or_default();
+        if self.file_delete_pattern.is_match(context) {
+            let details = self.extract_file_path(context).unwrap_or_default();
             return Some((ApprovalType::FileDelete, details));
         }
 
-        if self.bash_pattern.is_match(recent) {
-            let details = self.extract_command(recent).unwrap_or_default();
+        if self.bash_pattern.is_match(context) {
+            let details = self.extract_command(context).unwrap_or_default();
             return Some((ApprovalType::ShellCommand, details));
         }
 
-        if self.mcp_pattern.is_match(recent) {
+        if self.mcp_pattern.is_match(context) {
             return Some((ApprovalType::McpTool, "MCP tool call".to_string()));
         }
 
-        if self.general_approval_pattern.is_match(recent) {
-            return Some((ApprovalType::Other("Pending approval".to_string()), String::new()));
+        // Generic approval
+        Some((ApprovalType::Other("Pending approval".to_string()), String::new()))
+    }
+
+    /// Detect Claude Code's button-style Yes/No approval
+    /// Looks for patterns like:
+    ///   Yes
+    ///   Yes, and don't ask again...
+    ///   No
+    fn detect_yes_no_buttons(&self, lines: &[&str]) -> bool {
+        // Check last 8 lines for Yes/No buttons
+        let check_lines: Vec<&str> = lines.iter().rev().take(8).copied().collect();
+
+        let mut has_yes = false;
+        let mut has_no = false;
+        let mut yes_line_idx: Option<usize> = None;
+        let mut no_line_idx: Option<usize> = None;
+
+        for (idx, line) in check_lines.iter().enumerate() {
+            let trimmed = line.trim();
+
+            // Skip empty lines and very long lines (not buttons)
+            if trimmed.is_empty() || trimmed.len() > 50 {
+                continue;
+            }
+
+            // Check for "Yes" button-style lines
+            // Must be short line starting with "Yes" (button format)
+            if (trimmed == "Yes" || trimmed.starts_with("Yes,") || trimmed.starts_with("Yes "))
+                && trimmed.len() < 40
+            {
+                has_yes = true;
+                yes_line_idx = Some(idx);
+            }
+
+            // Check for "No" button-style lines
+            if (trimmed == "No" || trimmed.starts_with("No,") || trimmed.starts_with("No "))
+                && trimmed.len() < 40
+            {
+                has_no = true;
+                no_line_idx = Some(idx);
+            }
         }
 
-        None
+        // Both Yes and No must be present and close together (within 4 lines)
+        if has_yes && has_no {
+            if let (Some(y_idx), Some(n_idx)) = (yes_line_idx, no_line_idx) {
+                let distance = if y_idx > n_idx { y_idx - n_idx } else { n_idx - y_idx };
+                return distance <= 4;
+            }
+        }
+
+        false
     }
 
     /// Extract user question with numbered choices
@@ -313,22 +385,133 @@ impl AgentParser for ClaudeCodeParser {
             };
         }
 
-        // Check recent content for activity indicators
-        let recent = safe_tail(content, 500);
+        let lines: Vec<&str> = content.lines().collect();
 
-        if self.thinking_pattern.is_match(recent) {
-            return AgentStatus::Processing {
-                activity: "Thinking...".to_string(),
-            };
+        // Check for active processing indicators BEFORE idle check
+        // Look in the last 20 lines for activity
+        let recent_lines: Vec<&str> = lines.iter().rev().take(20).map(|s| *s).collect();
+        for line in &recent_lines {
+            let trimmed = line.trim();
+
+            // Skip empty lines and separator lines
+            if trimmed.is_empty() || trimmed.chars().all(|c| c == '─' || c == '━' || c == '-') {
+                continue;
+            }
+
+            // Claude Code specific indicators
+            // ✽ indicates active processing with status
+            if trimmed.starts_with('✽') {
+                // Extract activity from the line
+                let activity = trimmed.trim_start_matches('✽').trim();
+                let short_activity = activity.split('(').next().unwrap_or(activity).trim();
+                return AgentStatus::Processing {
+                    activity: short_activity.chars().take(30).collect(),
+                };
+            }
+
+            // ⏺ indicates active tool call
+            if trimmed.starts_with('⏺') && !trimmed.contains("completed") && !trimmed.contains("finished") {
+                return AgentStatus::Processing {
+                    activity: "Tool running...".to_string(),
+                };
+            }
+
+            // · (middle dot) with activity text like "Channelling…"
+            if trimmed.starts_with('·') || trimmed.starts_with('•') {
+                let activity = trimmed.trim_start_matches('·').trim_start_matches('•').trim();
+                if !activity.is_empty() {
+                    return AgentStatus::Processing {
+                        activity: activity.chars().take(30).collect(),
+                    };
+                }
+            }
+
+            // "Running…" indicator
+            if trimmed.contains("Running…") || trimmed.contains("Running...") {
+                return AgentStatus::Processing {
+                    activity: "Running...".to_string(),
+                };
+            }
+
+            // Active spinners (braille patterns used by Claude Code)
+            if trimmed.contains('⠿') || trimmed.contains('⠇') || trimmed.contains('⠋') ||
+               trimmed.contains('⠙') || trimmed.contains('⠸') || trimmed.contains('⠴') ||
+               trimmed.contains('⠦') || trimmed.contains('⠧') || trimmed.contains('⠖') ||
+               trimmed.contains('⠏') || trimmed.contains('⠹') || trimmed.contains('⠼') ||
+               trimmed.contains('⠷') || trimmed.contains('⠾') || trimmed.contains('⠐') ||
+               trimmed.contains('⠽') || trimmed.contains('⠻') {
+                return AgentStatus::Processing {
+                    activity: "Processing...".to_string(),
+                };
+            }
+
+            // Other progress indicators
+            if trimmed.contains('◐') || trimmed.contains('◑') ||
+               trimmed.contains('◒') || trimmed.contains('◓') ||
+               trimmed.contains('⏳') {
+                return AgentStatus::Processing {
+                    activity: "Processing...".to_string(),
+                };
+            }
+
+            // Activity text patterns (Claude Code shows these during work)
+            let lower = trimmed.to_lowercase();
+            if lower.contains("channelling") || lower.contains("channeling") ||
+               lower.starts_with("streaming") || lower.starts_with("sending") ||
+               lower.starts_with("reading") || lower.starts_with("writing") ||
+               lower.starts_with("searching") || lower.starts_with("analyzing") ||
+               lower.starts_with("executing") || lower.starts_with("loading") ||
+               lower.starts_with("fetching") || lower.starts_with("compiling") {
+                return AgentStatus::Processing {
+                    activity: trimmed.chars().take(30).collect::<String>(),
+                };
+            }
         }
 
-        if self.tool_use_pattern.is_match(recent) {
+        // Check for tool usage indicators in last few lines (active work)
+        let last_5_lines = lines.iter().rev().take(5).map(|s| *s).collect::<Vec<_>>().join("\n");
+        if last_5_lines.contains("Read(") || last_5_lines.contains("Write(") ||
+           last_5_lines.contains("Edit(") || last_5_lines.contains("Bash(") ||
+           last_5_lines.contains("Glob(") || last_5_lines.contains("Grep(") ||
+           last_5_lines.contains("Task(") || last_5_lines.contains("TodoWrite(") ||
+           last_5_lines.contains("WebFetch(") || last_5_lines.contains("WebSearch(") {
             return AgentStatus::Processing {
                 activity: "Using tools...".to_string(),
             };
         }
 
-        if self.idle_pattern.is_match(recent) {
+        // Check for thinking/processing keywords in recent content
+        let last_3_lines = lines.iter().rev().take(3).map(|s| *s).collect::<Vec<_>>().join("\n");
+        if self.thinking_pattern.is_match(&last_3_lines) {
+            return AgentStatus::Processing {
+                activity: "Thinking...".to_string(),
+            };
+        }
+
+        // NOW check if the last non-empty line is a prompt (indicating idle)
+        // Claude Code shows ❯ when waiting for input, but ONLY if it's truly the end
+        let last_non_empty = lines.iter().rev()
+            .filter(|l| {
+                let t = l.trim();
+                !t.is_empty() &&
+                !t.chars().all(|c| c == '─' || c == '━' || c == '-') &&
+                !t.contains("⏵⏵") &&
+                !t.contains("accept edits") &&
+                !t.contains("shift+tab")
+            })
+            .next();
+
+        if let Some(line) = last_non_empty {
+            let trimmed = line.trim();
+            // Prompt characters indicating idle state
+            // Must be ONLY the prompt character, truly at the end
+            if trimmed == "❯" || trimmed == ">" {
+                return AgentStatus::Idle;
+            }
+        }
+
+        // Default to Idle if we have content but can't determine state
+        if !content.trim().is_empty() {
             return AgentStatus::Idle;
         }
 
@@ -383,6 +566,15 @@ impl AgentParser for ClaudeCodeParser {
         }
 
         subagents
+    }
+
+    fn parse_context_remaining(&self, content: &str) -> Option<u8> {
+        // Look for context percentage in the last portion of content
+        let recent = safe_tail(content, 1000);
+        self.context_pattern
+            .captures(recent)
+            .and_then(|cap| cap.get(1))
+            .and_then(|m| m.as_str().parse::<u8>().ok())
     }
 
     fn approval_keys(&self) -> &str {
@@ -469,5 +661,44 @@ mod tests {
 
         let subagents = parser.parse_subagents(content);
         assert!(!subagents.is_empty());
+    }
+
+    #[test]
+    fn test_yes_no_button_approval() {
+        let parser = ClaudeCodeParser::new();
+        // Claude Code button-style approval
+        let content = r#"
+Do you want to allow this action?
+
+  Yes
+  Yes, and don't ask again for this session
+  No
+"#;
+        let status = parser.parse_status(content);
+        match status {
+            AgentStatus::AwaitingApproval { .. } => {}
+            _ => panic!("Expected AwaitingApproval for Yes/No buttons, got {:?}", status),
+        }
+    }
+
+    #[test]
+    fn test_idle_with_prompt() {
+        let parser = ClaudeCodeParser::new();
+        // Content ending with prompt should be idle
+        let content = "Some previous output\n\n❯ ";
+        let status = parser.parse_status(content);
+        assert!(matches!(status, AgentStatus::Idle), "Expected Idle, got {:?}", status);
+    }
+
+    #[test]
+    fn test_no_false_positive_approval() {
+        let parser = ClaudeCodeParser::new();
+        // Regular text with "Yes" and "No" should NOT trigger approval
+        let content = r#"
+The answer is Yes or No depending on the context.
+This is just normal text.
+❯ "#;
+        let status = parser.parse_status(content);
+        assert!(matches!(status, AgentStatus::Idle), "Expected Idle (no false positive), got {:?}", status);
     }
 }

@@ -5,10 +5,17 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use parking_lot::Mutex;
 
+/// Process info stored in cache
+#[derive(Clone, Debug)]
+struct ProcessInfo {
+    command: String,
+    parent_pid: Option<u32>,
+}
+
 /// Cached process tree for efficient child process lookup
 struct ProcessTreeCache {
-    /// Map of PID -> (command, parent_pid)
-    processes: HashMap<u32, (String, Option<u32>)>,
+    /// Map of PID -> ProcessInfo
+    processes: HashMap<u32, ProcessInfo>,
     /// When the cache was last updated
     last_update: Instant,
 }
@@ -45,7 +52,10 @@ impl ProcessTreeCache {
                 if let (Ok(pid), Ok(ppid)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
                     let cmd = parts[2].trim().to_string();
                     let parent = if ppid == 0 { None } else { Some(ppid) };
-                    self.processes.insert(pid, (cmd, parent));
+                    self.processes.insert(pid, ProcessInfo {
+                        command: cmd,
+                        parent_pid: parent,
+                    });
                 }
             }
         }
@@ -65,14 +75,14 @@ impl ProcessTreeCache {
         }
 
         // Find all processes with this pid as parent
-        for (&child_pid, (cmd, parent)) in &self.processes {
-            if *parent == Some(pid) {
+        for (&child_pid, info) in &self.processes {
+            if info.parent_pid == Some(pid) {
                 // Add full command
-                commands.push(cmd.clone());
+                commands.push(info.command.clone());
                 // Add base name
-                if let Some(first) = cmd.split_whitespace().next() {
+                if let Some(first) = info.command.split_whitespace().next() {
                     if let Some(base) = first.rsplit('/').next() {
-                        if base != cmd {
+                        if base != info.command {
                             commands.push(base.to_string());
                         }
                     }
@@ -84,7 +94,7 @@ impl ProcessTreeCache {
     }
 
     fn get_cmdline(&self, pid: u32) -> Option<String> {
-        self.processes.get(&pid).map(|(cmd, _)| cmd.clone())
+        self.processes.get(&pid).map(|info| info.command.clone())
     }
 }
 

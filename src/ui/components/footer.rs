@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::app::{AppState, InputMode};
+use crate::app::AppState;
 
 /// Footer widget showing available keybindings
 pub struct FooterWidget;
@@ -18,18 +18,18 @@ impl FooterWidget {
         let sep_style = Style::default().fg(Color::DarkGray);
         let input_style = Style::default().fg(Color::Green).add_modifier(Modifier::BOLD);
 
-        // Different display based on input mode
-        let spans = if let InputMode::Input { buffer, .. } = &state.input_mode {
-            // Input mode display
+        // Different display based on focus
+        let spans = if state.is_input_focused() {
+            // Input focused - show input-specific hints
             vec![
-                Span::styled(" INPUT MODE: ", input_style),
-                Span::styled(buffer.as_str(), Style::default().fg(Color::White)),
-                Span::styled("█", Style::default().fg(Color::Green)), // cursor
-                Span::styled(" │", sep_style),
+                Span::styled(" INPUT ", input_style),
+                Span::styled("│", sep_style),
                 Span::styled(" [Enter]", key_style),
                 Span::styled(" Send ", text_style),
+                Span::styled("[S-Enter]", key_style),
+                Span::styled(" Newline ", text_style),
                 Span::styled("[Esc]", key_style),
-                Span::styled(" Cancel ", text_style),
+                Span::styled(" Back ", text_style),
             ]
         } else {
             // Normal mode display
@@ -41,15 +41,15 @@ impl FooterWidget {
                 Span::styled("[A]", key_style),
                 Span::styled(" All ", text_style),
                 Span::styled("│", sep_style),
-                Span::styled(" [1-9]", key_style),
-                Span::styled(" Choice ", text_style),
-                Span::styled("[I]", key_style),
+                Span::styled(" [F]", key_style),
+                Span::styled(" Focus ", text_style),
+                Span::styled("[→]", key_style),
                 Span::styled(" Input ", text_style),
                 Span::styled("│", sep_style),
                 Span::styled(" [Space]", key_style),
                 Span::styled(" Select ", text_style),
-                Span::styled("[S]", key_style),
-                Span::styled(" Log ", text_style),
+                Span::styled("[1-9]", key_style),
+                Span::styled(" Choice ", text_style),
             ];
 
             // Show selection count if any

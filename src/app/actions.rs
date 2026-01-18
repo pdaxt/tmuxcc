@@ -29,14 +29,18 @@ pub enum Action {
     ShowHelp,
     /// Hide help
     HideHelp,
-    /// Enter input mode
-    EnterInputMode,
-    /// Send input and exit input mode
+    /// Focus on input panel
+    FocusInput,
+    /// Focus on sidebar
+    FocusSidebar,
+    /// Send input to selected agent
     SendInput,
-    /// Cancel input mode
-    CancelInput,
+    /// Clear input buffer
+    ClearInput,
     /// Add character to input
     InputChar(char),
+    /// Add newline to input
+    InputNewline,
     /// Delete last character
     InputBackspace,
     /// Send a specific number (for choice selection)
@@ -67,10 +71,12 @@ impl Action {
             Action::Refresh => "Refresh agent list",
             Action::ShowHelp => "Show help",
             Action::HideHelp => "Hide help",
-            Action::EnterInputMode => "Enter input mode",
+            Action::FocusInput => "Focus input panel",
+            Action::FocusSidebar => "Focus sidebar",
             Action::SendInput => "Send input",
-            Action::CancelInput => "Cancel input",
+            Action::ClearInput => "Clear input",
             Action::InputChar(_) => "Type character",
+            Action::InputNewline => "Insert newline",
             Action::InputBackspace => "Delete character",
             Action::SendNumber(_) => "Send choice number",
             Action::SidebarWider => "Widen sidebar",

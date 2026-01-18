@@ -45,6 +45,12 @@ pub trait AgentParser: Send + Sync {
         Vec::new()
     }
 
+    /// Parses context remaining percentage from content (default: None)
+    fn parse_context_remaining(&self, content: &str) -> Option<u8> {
+        let _ = content;
+        None
+    }
+
     /// Returns the key(s) to send for approval
     fn approval_keys(&self) -> &str {
         "y"

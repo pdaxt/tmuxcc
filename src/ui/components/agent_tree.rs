@@ -44,19 +44,27 @@ impl AgentTreeWidget {
         let subagent_count = state.agents.running_subagent_count();
         let selected_count = state.selected_agents.len();
 
-        // Build title with counts
+        // Build title
         let title = if selected_count > 0 {
-            format!(" {} sel, {} pending ", selected_count, active_count)
+            format!(" {} sel │ {} pending ", selected_count, active_count)
         } else if subagent_count > 0 {
-            format!(" {} pending, {} subagents ", active_count, subagent_count)
+            format!(" {} pending │ {} subs ", active_count, subagent_count)
+        } else if active_count > 0 {
+            format!(" ⚠ {} pending ", active_count)
         } else {
-            format!(" {} pending ", active_count)
+            format!(" {} agents ", agents.len())
+        };
+
+        let border_color = if !state.is_input_focused() {
+            Color::Cyan
+        } else {
+            Color::Gray
         };
 
         let block = Block::default()
             .title(title)
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Gray));
+            .border_style(Style::default().fg(border_color));
 
         if agents.is_empty() {
             let empty_text = List::new(vec![ListItem::new(Line::from(vec![Span::styled(
@@ -86,8 +94,7 @@ impl AgentTreeWidget {
 
                 // Window header
                 let window_line = Line::from(vec![
-                    Span::styled(format!(" {}", window_prefix), Style::default().fg(Color::DarkGray)),
-                    Span::raw(" "),
+                    Span::styled(format!(" {} ", window_prefix), Style::default().fg(Color::DarkGray)),
                     Span::styled(
                         format!("{}: {}", window_num, window_name),
                         Style::default().fg(Color::White),
@@ -100,21 +107,14 @@ impl AgentTreeWidget {
                     let is_selected = state.is_multi_selected(*original_idx);
                     let is_last_agent = agent_idx == window_agents.len() - 1;
 
-                    // Continuation prefix for subsequent lines
-                    let cont_prefix = if is_last_window {
-                        "    "
-                    } else {
-                        " │  "
-                    };
+                    let cont_prefix = if is_last_window { "    " } else { " │  " };
 
-                    // Tree prefix
                     let tree_prefix = if is_last_window {
                         if is_last_agent && agent.subagents.is_empty() { "    └─" } else { "    ├─" }
                     } else {
                         if is_last_agent && agent.subagents.is_empty() { " │  └─" } else { " │  ├─" }
                     };
 
-                    // Selection/cursor indicator
                     let select_indicator = if is_selected && is_cursor {
                         "▸●"
                     } else if is_selected {
@@ -125,19 +125,19 @@ impl AgentTreeWidget {
                         "  "
                     };
 
-                    // Status indicator with color
-                    let (status_char, status_style) = match &agent.status {
-                        AgentStatus::Idle => ("●", Style::default().fg(Color::Green)),
-                        AgentStatus::Processing { .. } => ("◐", Style::default().fg(Color::Yellow)),
+                    // Status indicator and text
+                    let (status_char, status_text, status_style) = match &agent.status {
+                        AgentStatus::Idle => ("●", "Idle", Style::default().fg(Color::Green)),
+                        AgentStatus::Processing { .. } => ("◐", "Working", Style::default().fg(Color::Yellow)),
                         AgentStatus::AwaitingApproval { .. } => (
                             "⚠",
+                            "Waiting",
                             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
                         ),
-                        AgentStatus::Error { .. } => ("✗", Style::default().fg(Color::Red)),
-                        AgentStatus::Unknown => ("○", Style::default().fg(Color::DarkGray)),
+                        AgentStatus::Error { .. } => ("✗", "Error", Style::default().fg(Color::Red)),
+                        AgentStatus::Unknown => ("○", "Unknown", Style::default().fg(Color::DarkGray)),
                     };
 
-                    // Agent type color
                     let type_style = match agent.agent_type {
                         AgentType::ClaudeCode => Style::default().fg(Color::Magenta),
                         AgentType::OpenCode => Style::default().fg(Color::Blue),
@@ -146,7 +146,15 @@ impl AgentTreeWidget {
                         AgentType::Unknown => Style::default().fg(Color::DarkGray),
                     };
 
-                    // Main agent line: abbreviated path
+                    let item_style = if is_cursor {
+                        Style::default().bg(Color::DarkGray)
+                    } else if is_selected {
+                        Style::default().bg(Color::Rgb(40, 40, 60))
+                    } else {
+                        Style::default()
+                    };
+
+                    // Main line: status + path
                     let line = Line::from(vec![
                         Span::styled(select_indicator, if is_selected {
                             Style::default().fg(Color::Cyan)
@@ -158,29 +166,39 @@ impl AgentTreeWidget {
                         Span::raw(" "),
                         Span::styled(agent.abbreviated_path(), Style::default().fg(Color::Cyan)),
                     ]);
-
-                    let item_style = if is_cursor {
-                        Style::default().bg(Color::DarkGray)
-                    } else if is_selected {
-                        Style::default().bg(Color::Rgb(40, 40, 60))
-                    } else {
-                        Style::default()
-                    };
-
                     items.push(ListItem::new(line).style(item_style));
 
-                    // Agent type line
-                    let type_line = Line::from(vec![
+                    // Info line: type | status | pid | uptime | context
+                    let mut info_parts = vec![
                         Span::raw("  "),
                         Span::styled(format!("{}│  ", cont_prefix), Style::default().fg(Color::DarkGray)),
-                        Span::styled(agent.agent_type.display_name(), type_style),
-                    ]);
-                    items.push(ListItem::new(type_line).style(item_style));
+                        Span::styled(agent.agent_type.short_name(), type_style),
+                        Span::styled(" │ ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(status_text, status_style),
+                        Span::styled(" │ ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(format!("pid:{}", agent.pid), Style::default().fg(Color::DarkGray)),
+                        Span::styled(" │ ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(agent.uptime_str(), Style::default().fg(Color::DarkGray)),
+                    ];
 
-                    // Status detail line (if has meaningful status)
+                    // Context bar if available
+                    if let Some(ctx) = agent.context_remaining {
+                        let bar_color = if ctx > 50 {
+                            Color::Green
+                        } else if ctx > 20 {
+                            Color::Yellow
+                        } else {
+                            Color::Red
+                        };
+                        info_parts.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
+                        info_parts.push(Span::styled(context_bar(ctx), Style::default().fg(bar_color)));
+                    }
+
+                    items.push(ListItem::new(Line::from(info_parts)).style(item_style));
+
+                    // Status details
                     match &agent.status {
                         AgentStatus::AwaitingApproval { approval_type, details } => {
-                            // Show approval type
                             let approval_line = Line::from(vec![
                                 Span::raw("  "),
                                 Span::styled(format!("{}│  ", cont_prefix), Style::default().fg(Color::DarkGray)),
@@ -192,9 +210,8 @@ impl AgentTreeWidget {
                             ]);
                             items.push(ListItem::new(approval_line).style(item_style));
 
-                            // Show details if available
                             if !details.is_empty() {
-                                let detail_text = truncate_str(details, available_width.saturating_sub(12));
+                                let detail_text = truncate_str(details, available_width.saturating_sub(14));
                                 let detail_line = Line::from(vec![
                                     Span::raw("  "),
                                     Span::styled(format!("{}│  ", cont_prefix), Style::default().fg(Color::DarkGray)),
@@ -204,7 +221,6 @@ impl AgentTreeWidget {
                                 items.push(ListItem::new(detail_line).style(item_style));
                             }
 
-                            // Show choices for UserQuestion
                             if let ApprovalType::UserQuestion { choices, .. } = approval_type {
                                 for (i, choice) in choices.iter().take(4).enumerate() {
                                     let choice_text = truncate_str(choice, available_width.saturating_sub(14));
@@ -231,7 +247,7 @@ impl AgentTreeWidget {
                         }
                         AgentStatus::Processing { activity } => {
                             if !activity.is_empty() {
-                                let activity_text = truncate_str(activity, available_width.saturating_sub(12));
+                                let activity_text = truncate_str(activity, available_width.saturating_sub(14));
                                 let activity_line = Line::from(vec![
                                     Span::raw("  "),
                                     Span::styled(format!("{}│  ", cont_prefix), Style::default().fg(Color::DarkGray)),
@@ -242,7 +258,7 @@ impl AgentTreeWidget {
                             }
                         }
                         AgentStatus::Error { message } => {
-                            let error_text = truncate_str(message, available_width.saturating_sub(12));
+                            let error_text = truncate_str(message, available_width.saturating_sub(14));
                             let error_line = Line::from(vec![
                                 Span::raw("  "),
                                 Span::styled(format!("{}│  ", cont_prefix), Style::default().fg(Color::DarkGray)),
@@ -254,7 +270,7 @@ impl AgentTreeWidget {
                         _ => {}
                     }
 
-                    // Show subagents
+                    // Subagents
                     for (sub_idx, subagent) in agent.subagents.iter().enumerate() {
                         let is_last_sub = sub_idx == agent.subagents.len() - 1;
                         let sub_branch = if is_last_sub { "└─" } else { "├─" };
@@ -266,7 +282,6 @@ impl AgentTreeWidget {
                             SubagentStatus::Unknown => ("?", Style::default().fg(Color::DarkGray)),
                         };
 
-                        // Duration for running subagents
                         let duration = if matches!(subagent.status, SubagentStatus::Running) {
                             format!(" ({})", subagent.duration_str())
                         } else {
@@ -286,7 +301,6 @@ impl AgentTreeWidget {
                         ]);
                         items.push(ListItem::new(sub_line));
 
-                        // Show subagent description
                         if !subagent.description.is_empty() {
                             let desc_prefix = if is_last_sub { "   " } else { "│  " };
                             let desc_text = truncate_str(&subagent.description, available_width.saturating_sub(14));
@@ -310,11 +324,16 @@ impl AgentTreeWidget {
     }
 }
 
-/// Truncate a string to a maximum length, adding ".." if truncated
 fn truncate_str(s: &str, max_len: usize) -> String {
     if s.chars().count() <= max_len {
         s.to_string()
     } else {
         format!("{}..", s.chars().take(max_len.saturating_sub(2)).collect::<String>())
     }
+}
+
+fn context_bar(percent: u8) -> String {
+    let filled = (percent as usize * 5) / 100;
+    let empty = 5 - filled;
+    format!("ctx[{}{}]{}%", "█".repeat(filled), "░".repeat(empty), percent)
 }
