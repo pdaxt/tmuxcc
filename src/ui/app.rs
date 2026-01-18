@@ -17,7 +17,7 @@ use crate::tmux::TmuxClient;
 use crate::parsers::ParserRegistry;
 
 use super::components::{
-    AgentTreeWidget, FooterWidget, HelpWidget, InputWidget, PanePreviewWidget, SubagentLogWidget,
+    AgentTreeWidget, FooterWidget, HeaderWidget, HelpWidget, InputWidget, PanePreviewWidget, SubagentLogWidget,
 };
 use super::Layout;
 
@@ -83,12 +83,15 @@ async fn run_loop(
             let size = frame.area();
             let main_chunks = Layout::main_layout(size);
 
+            // Header
+            HeaderWidget::render(frame, main_chunks[0], state);
+
             // Always show input widget at bottom of right column
             let input_height = InputWidget::calculate_height(state.get_input(), 6);
 
             if state.show_subagent_log {
                 // With subagent log: sidebar | summary+preview+input | subagent_log
-                let (left, preview, subagent_log) = Layout::content_layout_with_log(main_chunks[0], state.sidebar_width);
+                let (left, preview, subagent_log) = Layout::content_layout_with_log(main_chunks[1], state.sidebar_width);
                 AgentTreeWidget::render(frame, left, state);
 
                 // Split preview area for summary, preview, and input
@@ -107,7 +110,7 @@ async fn run_loop(
             } else {
                 // Normal: sidebar | summary+preview+input
                 let (left, summary, preview, input_area) = Layout::content_layout_with_input(
-                    main_chunks[0], state.sidebar_width, input_height
+                    main_chunks[1], state.sidebar_width, input_height
                 );
                 AgentTreeWidget::render(frame, left, state);
                 PanePreviewWidget::render_summary(frame, summary, state);
@@ -116,7 +119,7 @@ async fn run_loop(
             }
 
             // Footer
-            FooterWidget::render(frame, main_chunks[1], state);
+            FooterWidget::render(frame, main_chunks[2], state);
 
             // Help overlay
             if state.show_help {

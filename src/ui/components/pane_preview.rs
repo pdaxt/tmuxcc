@@ -2,7 +2,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Paragraph, Wrap},
     Frame,
 };
 
@@ -172,6 +172,7 @@ impl PanePreviewWidget {
         let block = Block::default()
             .title(title)
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Color::Gray));
 
         let paragraph = Paragraph::new(lines).block(block);
@@ -213,6 +214,7 @@ impl PanePreviewWidget {
         let block = Block::default()
             .title(title)
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Color::Gray));
 
         let paragraph = Paragraph::new(content)
@@ -276,6 +278,7 @@ impl PanePreviewWidget {
         let block = Block::default()
             .title(title)
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Color::Gray));
 
         let paragraph = Paragraph::new(lines)

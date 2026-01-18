@@ -52,6 +52,15 @@ impl AgentTree {
             .count()
     }
 
+    /// Returns the number of processing agents
+    pub fn processing_count(&self) -> usize {
+        use crate::agents::AgentStatus;
+        self.root_agents
+            .iter()
+            .filter(|a| matches!(a.status, AgentStatus::Processing { .. }))
+            .count()
+    }
+
     /// Gets an agent by index (for selection)
     pub fn get_agent(&self, index: usize) -> Option<&MonitoredAgent> {
         self.root_agents.get(index)

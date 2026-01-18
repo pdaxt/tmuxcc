@@ -2,7 +2,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem},
+    widgets::{Block, BorderType, Borders, List, ListItem},
     Frame,
 };
 
@@ -25,6 +25,7 @@ impl SubagentLogWidget {
         let block = Block::default()
             .title(title)
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Color::Gray));
 
         let items: Vec<ListItem> = if let Some(agent) = agent {

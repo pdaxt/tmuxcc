@@ -4,13 +4,14 @@ use ratatui::layout::{Constraint, Direction, Rect};
 pub struct Layout;
 
 impl Layout {
-    /// Creates the main layout with content and footer (no header)
+    /// Creates the main layout with header, content, and footer
     pub fn main_layout(area: Rect) -> Vec<Rect> {
         ratatui::layout::Layout::default()
             .direction(Direction::Vertical)
             .constraints([
+                Constraint::Length(3),  // Header
                 Constraint::Min(10),    // Content area
-                Constraint::Length(3),  // Footer
+                Constraint::Length(4),  // Footer (2 lines + border)
             ])
             .split(area)
             .to_vec()

@@ -4,7 +4,7 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState},
+    widgets::{Block, BorderType, Borders, List, ListItem, ListState},
     Frame,
 };
 
@@ -64,6 +64,7 @@ impl AgentTreeWidget {
         let block = Block::default()
             .title(title)
             .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(border_color));
 
         if agents.is_empty() {
@@ -116,11 +117,11 @@ impl AgentTreeWidget {
                     };
 
                     let select_indicator = if is_selected && is_cursor {
-                        "▸●"
+                        "┃☑"  // カーソル+選択: 縦線とチェック
                     } else if is_selected {
-                        " ●"
+                        " ☑"  // 選択のみ: チェック
                     } else if is_cursor {
-                        "▸ "
+                        "┃ "  // カーソルのみ: 縦線
                     } else {
                         "  "
                     };
@@ -147,9 +148,9 @@ impl AgentTreeWidget {
                     };
 
                     let item_style = if is_cursor {
-                        Style::default().bg(Color::DarkGray)
+                        Style::default().bg(Color::Rgb(50, 50, 70))  // より濃い紫がかった背景
                     } else if is_selected {
-                        Style::default().bg(Color::Rgb(40, 40, 60))
+                        Style::default().bg(Color::Rgb(35, 35, 50))  // 薄めの選択背景
                     } else {
                         Style::default()
                     };
@@ -333,7 +334,8 @@ fn truncate_str(s: &str, max_len: usize) -> String {
 }
 
 fn context_bar(percent: u8) -> String {
-    let filled = (percent as usize * 5) / 100;
-    let empty = 5 - filled;
-    format!("ctx[{}{}]{}%", "█".repeat(filled), "░".repeat(empty), percent)
+    let total_blocks = 10;
+    let filled = (percent as usize * total_blocks) / 100;
+    let empty = total_blocks - filled;
+    format!("{}{}│{:>3}%", "█".repeat(filled), "░".repeat(empty), percent)
 }
