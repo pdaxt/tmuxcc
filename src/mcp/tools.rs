@@ -10,7 +10,7 @@ use crate::state;
 use crate::state::types::PaneState;
 use super::types::*;
 
-/// Execute os_spawn logic
+/// Execute os_spawn logic — allocates PTY and spawns Claude agent
 pub async fn spawn(app: &App, req: SpawnRequest) -> String {
     let pane_num = match config::resolve_pane(&req.pane) {
         Some(n) => n,
@@ -37,6 +37,24 @@ pub async fn spawn(app: &App, req: SpawnRequest) -> String {
     let preamble = claude::generate_preamble(pane_num, theme, &project_name, &role, &task, &prompt);
     let _ = claude::write_preamble(pane_num, &preamble);
 
+    // Build env vars
+    let config_dir = claude::account_config_dir(pane_num);
+    let env_vars = vec![
+        ("P".to_string(), pane_num.to_string()),
+        ("CLAUDE_CONFIG_DIR".to_string(), config_dir),
+    ];
+
+    // Spawn PTY
+    let pty_result = {
+        let mut pty = app.pty.lock().unwrap();
+        pty.spawn(pane_num, "claude", &["-c"], &project_path, env_vars)
+    };
+
+    let pty_status = match pty_result {
+        Ok(()) => "pty_spawned".to_string(),
+        Err(e) => format!("pty_error: {}", e),
+    };
+
     // Update state
     let pane_state = PaneState {
         theme: theme.to_string(),
@@ -60,6 +78,24 @@ pub async fn spawn(app: &App, req: SpawnRequest) -> String {
     // Update multi_agent agents.json
     update_agents_json(pane_num, &project_name, &task);
 
+    // Schedule initial prompt delivery after delay
+    if !prompt.is_empty() || !task.is_empty() {
+        let initial_msg = if !prompt.is_empty() {
+            prompt.clone()
+        } else {
+            task.clone()
+        };
+        // Send the initial prompt to the PTY after a short delay
+        // (Claude CLI needs time to initialize)
+        let pty_arc = std::sync::Arc::clone(&app.pty);
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(10));
+            if let Ok(mut pty) = pty_arc.lock() {
+                let _ = pty.send_line(pane_num, &initial_msg);
+            }
+        });
+    }
+
     serde_json::json!({
         "status": "spawned",
         "pane": pane_num,
@@ -68,17 +104,27 @@ pub async fn spawn(app: &App, req: SpawnRequest) -> String {
         "role": role,
         "task": task,
         "project_path": project_path,
-        "note": "PTY spawn will be available in Phase 2. State updated."
+        "pty": pty_status,
     }).to_string()
 }
 
-/// Execute os_kill logic
+/// Execute os_kill logic — kills PTY process and cleans up state
 pub async fn kill(app: &App, req: KillRequest) -> String {
     let pane_num = match config::resolve_pane(&req.pane) {
         Some(n) => n,
         None => return json_err(&format!("Invalid pane: {}", req.pane)),
     };
     let reason = req.reason.unwrap_or_else(|| "manual".into());
+
+    // Kill PTY
+    let pty_result = {
+        let mut pty = app.pty.lock().unwrap();
+        pty.kill(pane_num)
+    };
+    let pty_status = match pty_result {
+        Ok(()) => "killed",
+        Err(_) => "no_pty",
+    };
 
     // Update state
     let mut pane_state = app.state.get_pane(pane_num).await;
@@ -93,7 +139,8 @@ pub async fn kill(app: &App, req: KillRequest) -> String {
     serde_json::json!({
         "status": "killed",
         "pane": pane_num,
-        "reason": reason
+        "reason": reason,
+        "pty": pty_status,
     }).to_string()
 }
 
@@ -129,7 +176,7 @@ pub async fn restart(app: &App, req: RestartRequest) -> String {
     }).await
 }
 
-/// Execute os_reassign logic
+/// Execute os_reassign logic — sends new task to running agent via PTY
 pub async fn reassign(app: &App, req: ReassignRequest) -> String {
     let pane_num = match config::resolve_pane(&req.pane) {
         Some(n) => n,
@@ -154,6 +201,21 @@ pub async fn reassign(app: &App, req: ReassignRequest) -> String {
     }
     if let Some(task) = &req.task {
         pane_data.task = task.clone();
+    }
+
+    // Send new task to the running agent via PTY
+    if let Some(task) = &req.task {
+        let msg = format!(
+            "NEW TASK: {}\nRole: {}\nProject: {}\nPlease acknowledge and begin working on this new task.",
+            task, pane_data.role, pane_data.project
+        );
+        let send_result = {
+            let mut pty = app.pty.lock().unwrap();
+            pty.send_line(pane_num, &msg)
+        };
+        if let Err(e) = send_result {
+            tracing::warn!("Failed to send reassign message to pane {}: {}", pane_num, e);
+        }
     }
 
     app.state.set_pane(pane_num, pane_data.clone()).await;
@@ -268,30 +330,73 @@ pub async fn assign_adhoc(app: &App, req: AssignAdhocRequest) -> String {
     }).await
 }
 
-/// Execute os_collect logic
+/// Execute os_collect logic — reads real PTY output
 pub async fn collect(app: &App, req: CollectRequest) -> String {
     let pane_num = match config::resolve_pane(&req.pane) {
         Some(n) => n,
         None => return json_err(&format!("Invalid pane: {}", req.pane)),
     };
 
-    // In Phase 2 this will read from PTY output buffer.
-    // For now, return state-based info.
+    // Fetch state first (async), then PTY (sync) — never hold MutexGuard across await
     let pane_data = app.state.get_pane(pane_num).await;
-    let output = format!(
-        "[Phase 2: PTY output capture not yet available]\nPane {} ({}) - Status: {} - Task: {}",
-        pane_num, pane_data.theme, pane_data.status, pane_data.task
-    );
+    let state_snap = app.state.get_state_snapshot().await;
+    let markers = state_snap.config.completion_markers.clone();
 
-    let done = pane_data.status == "done" || pane_data.status == "idle";
+    // Collect PTY info under lock, then drop immediately
+    let pty_info = {
+        let pty = app.pty.lock().unwrap();
+        if pty.has_agent(pane_num) {
+            let output = pty.last_output(pane_num, 50).unwrap_or_default();
+            let screen = pty.screen_text(pane_num).unwrap_or_default();
+            let running = pty.is_running(pane_num);
+            let health = pty.check_health(pane_num, &markers);
+            let line_count = pty.line_count(pane_num);
+            Some((output, screen, running, health, line_count))
+        } else {
+            None
+        }
+    };
 
-    serde_json::json!({
-        "pane": pane_num,
-        "done": done,
-        "error": false,
-        "output": output,
-        "note": "PTY output capture available in Phase 2"
-    }).to_string()
+    if let Some((output, screen, running, health, line_count)) = pty_info {
+        let display_output = if !screen.trim().is_empty() {
+            truncate(&screen, 3000)
+        } else {
+            truncate(&output, 3000)
+        };
+
+        // Auto-update state if agent has finished
+        if health.done && pane_data.status == "active" {
+            app.state.update_pane_status(pane_num, "done").await;
+        }
+
+        serde_json::json!({
+            "pane": pane_num,
+            "theme": pane_data.theme,
+            "project": pane_data.project,
+            "task": truncate(&pane_data.task, 60),
+            "status": pane_data.status,
+            "running": running,
+            "done": health.done,
+            "error": health.error,
+            "done_marker": health.done_marker,
+            "output": display_output,
+            "line_count": line_count,
+        }).to_string()
+    } else {
+        let done = pane_data.status == "done" || pane_data.status == "idle";
+        serde_json::json!({
+            "pane": pane_num,
+            "theme": pane_data.theme,
+            "project": pane_data.project,
+            "task": truncate(&pane_data.task, 60),
+            "status": pane_data.status,
+            "running": false,
+            "done": done,
+            "error": serde_json::Value::Null,
+            "output": format!("[No PTY] Pane {} - Status: {}", pane_num, pane_data.status),
+            "line_count": 0,
+        }).to_string()
+    }
 }
 
 /// Execute os_complete logic
@@ -338,6 +443,12 @@ pub async fn complete(app: &App, req: CompleteRequest) -> String {
         "logged_at": state::now(),
         "summary": summary,
     }));
+
+    // Kill the PTY process
+    {
+        let mut pty = app.pty.lock().unwrap();
+        let _ = pty.kill(pane_num);
+    }
 
     // Update pane state
     pane_data.status = "idle".into();
@@ -403,6 +514,11 @@ pub async fn config_show(app: &App, req: ConfigShowRequest) -> String {
             };
             let pane_data = app.state.get_pane(pane_num).await;
             let mcps = app.state.get_project_mcps(&pane_data.project).await;
+            let (has_pty, running) = {
+                let pty = app.pty.lock().unwrap();
+                (pty.has_agent(pane_num), pty.is_running(pane_num))
+            };
+
             return serde_json::json!({
                 "pane": pane_num,
                 "theme": config::theme_name(pane_num),
@@ -411,43 +527,61 @@ pub async fn config_show(app: &App, req: ConfigShowRequest) -> String {
                 "role": pane_data.role,
                 "task": pane_data.task,
                 "status": pane_data.status,
+                "pty_active": has_pty,
+                "pty_running": running,
                 "preamble_exists": claude::preamble_exists(pane_num),
                 "project_mcps": mcps,
             }).to_string();
         }
     }
 
-    // All panes
-    let mut result = serde_json::Map::new();
+    // Fetch all pane state first (async)
+    let mut pane_states = Vec::new();
     for i in 1..=9u8 {
-        let pd = app.state.get_pane(i).await;
+        pane_states.push((i, app.state.get_pane(i).await));
+    }
+
+    // Then check PTY (sync)
+    let pty = app.pty.lock().unwrap();
+    let mut result = serde_json::Map::new();
+    for (i, pd) in &pane_states {
         result.insert(i.to_string(), serde_json::json!({
-            "theme": config::theme_name(i),
+            "theme": config::theme_name(*i),
             "project": pd.project,
             "role": pd.role,
             "task": pd.task,
             "status": pd.status,
+            "pty_active": pty.has_agent(*i),
         }));
     }
+    drop(pty);
     serde_json::Value::Object(result).to_string()
 }
 
 /// Execute os_status logic
 pub async fn status(app: &App) -> String {
-    let mut panes = Vec::new();
+    // Fetch state first (async), then PTY (sync)
+    let mut pane_states = Vec::new();
     for i in 1..=9u8 {
-        let pd = app.state.get_pane(i).await;
+        pane_states.push((i, app.state.get_pane(i).await));
+    }
+
+    let pty = app.pty.lock().unwrap();
+    let mut panes = Vec::new();
+    for (i, pd) in &pane_states {
         panes.push(serde_json::json!({
             "pane": i,
-            "theme": config::theme_name(i),
+            "theme": config::theme_name(*i),
             "project": pd.project,
             "role": config::role_short(&pd.role),
             "task": truncate(&pd.task, 40),
             "acu": pd.acu_spent,
             "status": pd.status,
             "issue_id": pd.issue_id,
+            "pty_running": pty.is_running(*i),
         }));
     }
+    drop(pty);
 
     let active = panes.iter().filter(|p| p["status"] == "active").count();
     let idle = panes.iter().filter(|p| {
@@ -466,21 +600,29 @@ pub async fn dashboard(app: &App, req: DashboardRequest) -> String {
     let cap = capacity::load_capacity();
     let board = tracker::load_board_summary();
 
-    let mut panes = Vec::new();
+    // Fetch all state first (async)
+    let mut pane_states = Vec::new();
     for i in 1..=9u8 {
-        let pd = app.state.get_pane(i).await;
+        pane_states.push((i, app.state.get_pane(i).await));
+    }
+    let state_snap = app.state.get_state_snapshot().await;
+    let log: Vec<_> = state_snap.activity_log.iter().take(8).cloned().collect();
+
+    // Then PTY info (sync)
+    let pty = app.pty.lock().unwrap();
+    let mut panes = Vec::new();
+    for (i, pd) in &pane_states {
         panes.push(serde_json::json!({
             "pane": i,
-            "theme": config::theme_name(i),
+            "theme": config::theme_name(*i),
             "project": pd.project,
             "task": truncate(&pd.task, 30),
             "role": config::role_short(&pd.role),
             "status": pd.status,
+            "pty": pty.is_running(*i),
         }));
     }
-
-    let state_snap = app.state.get_state_snapshot().await;
-    let log: Vec<_> = state_snap.activity_log.iter().take(8).cloned().collect();
+    drop(pty);
 
     let format = req.format.unwrap_or_else(|| "text".into());
     if format == "json" {
@@ -511,16 +653,17 @@ pub async fn dashboard(app: &App, req: DashboardRequest) -> String {
         format!("ACU: {}/{} ({}%)  Reviews: {}/{}  Bottleneck: {}",
             cap.acu_used, cap.acu_total, acu_pct, cap.reviews_used, cap.reviews_total, bn),
         String::new(),
-        " #  Theme   Project        Task                          Role  Status".into(),
-        " -  ------  -------------- ------------------------------ ----  ------".into(),
+        " #  Theme   Project        Task                          Role  Status  PTY".into(),
+        " -  ------  -------------- ------------------------------ ----  ------  ---".into(),
     ];
     for p in &panes {
-        lines.push(format!(" {}  {:<7} {:<14} {:<30} {:<5} {}",
+        lines.push(format!(" {}  {:<7} {:<14} {:<30} {:<5} {:<7} {}",
             p["pane"], p["theme"].as_str().unwrap_or(""),
             p["project"].as_str().unwrap_or("--"),
             p["task"].as_str().unwrap_or("--"),
             p["role"].as_str().unwrap_or("--"),
             p["status"].as_str().unwrap_or("idle"),
+            if p["pty"].as_bool().unwrap_or(false) { "Y" } else { "-" },
         ));
     }
 
@@ -558,48 +701,98 @@ pub async fn logs(app: &App, req: LogsRequest) -> String {
     serde_json::to_string(&log).unwrap_or_else(|_| "[]".into())
 }
 
-/// Execute os_health logic
+/// Execute os_health logic — real PTY health checks
 pub async fn health(app: &App) -> String {
     let state = app.state.get_state_snapshot().await;
     let stuck_mins = state.config.stuck_threshold_minutes;
+    let markers = state.config.completion_markers.clone();
 
-    let mut results = Vec::new();
+    // Fetch all pane state first (async)
+    let mut pane_states = Vec::new();
     for i in 1..=9u8 {
-        let pd = app.state.get_pane(i).await;
-        let status = &pd.status;
-        let mut health = "ok";
-        let mut detail = String::new();
+        pane_states.push((i, app.state.get_pane(i).await));
+    }
 
-        if status == "active" {
-            // Check if stuck
-            if let Some(started) = &pd.started_at {
-                if let Ok(start_dt) = NaiveDateTime::parse_from_str(started, "%Y-%m-%dT%H:%M:%S") {
-                    let now = Local::now().naive_local();
-                    let mins = (now - start_dt).num_minutes();
-                    if mins > (stuck_mins * 10) as i64 {
-                        health = "stuck";
-                        detail = format!("running {} minutes", mins);
+    // Then collect PTY health info (sync)
+    let pty = app.pty.lock().unwrap();
+    let mut results = Vec::new();
+    for (i, pd) in &pane_states {
+        let has_pty = pty.has_agent(*i);
+
+        if has_pty {
+            let health = pty.check_health(*i, &markers);
+            let mut health_status = if health.error.is_some() {
+                "error"
+            } else if health.done {
+                "done"
+            } else if health.running {
+                "ok"
+            } else {
+                "stopped"
+            };
+
+            // Check for stuck
+            if pd.status == "active" && health.running && !health.done {
+                if let Some(started) = &pd.started_at {
+                    if let Ok(start_dt) = NaiveDateTime::parse_from_str(started, "%Y-%m-%dT%H:%M:%S") {
+                        let now = Local::now().naive_local();
+                        let mins = (now - start_dt).num_minutes();
+                        if mins > (stuck_mins * 10) as i64 {
+                            health_status = "stuck";
+                        }
                     }
                 }
             }
-        }
 
-        results.push(serde_json::json!({
-            "pane": i,
-            "theme": config::theme_name(i),
-            "status": status,
-            "health": health,
-            "detail": detail,
-        }));
+            results.push(serde_json::json!({
+                "pane": *i,
+                "theme": config::theme_name(*i),
+                "status": pd.status,
+                "health": health_status,
+                "pty_running": health.running,
+                "has_output": health.has_output,
+                "error": health.error,
+                "done_marker": health.done_marker,
+                "line_count": pty.line_count(*i),
+            }));
+        } else {
+            let health_status = match pd.status.as_str() {
+                "idle" | "" => "idle",
+                "active" => "no_pty",
+                "done" => "done",
+                "error" => "error",
+                _ => "unknown",
+            };
+
+            results.push(serde_json::json!({
+                "pane": *i,
+                "theme": config::theme_name(*i),
+                "status": pd.status,
+                "health": health_status,
+                "pty_running": false,
+                "has_output": false,
+                "error": serde_json::Value::Null,
+                "done_marker": serde_json::Value::Null,
+                "line_count": 0,
+            }));
+        }
     }
+    drop(pty);
 
     let active = results.iter().filter(|r| r["status"] == "active").count();
     let stuck = results.iter().filter(|r| r["health"] == "stuck").count();
     let errors = results.iter().filter(|r| r["health"] == "error").count();
+    let pty_count = results.iter().filter(|r| r["pty_running"].as_bool().unwrap_or(false)).count();
 
     serde_json::json!({
         "panes": results,
-        "summary": {"active": active, "stuck": stuck, "errors": errors, "idle": 9 - active}
+        "summary": {
+            "active": active,
+            "stuck": stuck,
+            "errors": errors,
+            "idle": 9 - active,
+            "pty_running": pty_count,
+        }
     }).to_string()
 }
 
