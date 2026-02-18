@@ -80,6 +80,11 @@ impl StateManager {
         self.state.read().await.clone()
     }
 
+    /// Blocking read for non-async contexts (TUI thread)
+    pub fn blocking_read(&self) -> tokio::sync::RwLockReadGuard<'_, AgentOSState> {
+        self.state.blocking_read()
+    }
+
     pub async fn get_project_mcps(&self, project: &str) -> Vec<String> {
         let state = self.state.read().await;
         state.project_mcps.get(project).cloned().unwrap_or_default()

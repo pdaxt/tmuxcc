@@ -1,1 +1,2 @@
-// Pane view with tui-term — Phase 4
+// PTY output rendering is handled inline by dashboard::render_pty_output.
+// This module reserved for future full-screen pane view (enter on selected pane).

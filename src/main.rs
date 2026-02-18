@@ -55,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
             mcp::run_mcp_server(application).await?;
         }
         Some(Commands::Tui) => {
-            eprintln!("TUI mode coming in Phase 4");
+            tui::run_tui(application)?;
         }
         Some(Commands::Web { port }) => {
             web::run_web_server(application, port).await?;
