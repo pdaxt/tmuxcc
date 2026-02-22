@@ -93,12 +93,12 @@ impl FooterWidget {
                 Span::styled("│", sep),
                 Span::styled(" Enter", key),
                 Span::styled(":Send ", txt),
+                Span::styled("C-Enter", key),
+                Span::styled(":All ", txt),
                 Span::styled("S-Enter", key),
                 Span::styled(":NL ", txt),
                 Span::styled("Esc", key),
                 Span::styled(":Back ", txt),
-                Span::styled("←→", key),
-                Span::styled(":Move", txt),
             ])
         } else {
             let mut spans = vec![

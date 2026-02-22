@@ -37,6 +37,8 @@ pub enum Action {
     FocusSidebar,
     /// Send input to selected agent
     SendInput,
+    /// Send input to ALL selected agents (batch)
+    SendInputToAll,
     /// Clear input buffer
     ClearInput,
     /// Add character to input
@@ -99,6 +101,7 @@ impl Action {
             Action::FocusInput => "Focus input panel",
             Action::FocusSidebar => "Focus sidebar",
             Action::SendInput => "Send input",
+            Action::SendInputToAll => "Send input to all selected",
             Action::ClearInput => "Clear input",
             Action::InputChar(_) => "Type character",
             Action::InputNewline => "Insert newline",

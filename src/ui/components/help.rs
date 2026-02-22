@@ -80,6 +80,10 @@ impl HelpWidget {
                 Span::styled("Switch focus (Sidebar / Input)", desc_style),
             ]),
             Line::from(vec![
+                Span::styled("  C-Enter  ", key_style),
+                Span::styled("Send input to all selected agents", desc_style),
+            ]),
+            Line::from(vec![
                 Span::styled("  f / F    ", key_style),
                 Span::styled("Focus on selected pane in tmux", desc_style),
             ]),

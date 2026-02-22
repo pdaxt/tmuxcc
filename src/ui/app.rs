@@ -447,6 +447,25 @@ async fn run_loop(
                                 }
                                 // Stay in input mode for consecutive inputs
                             }
+                            Action::SendInputToAll => {
+                                let input = state.take_input();
+                                if !input.is_empty() {
+                                    let indices = state.get_operation_indices();
+                                    let mut sent = 0usize;
+                                    for idx in &indices {
+                                        if let Some(agent) = state.agents.get_agent(*idx) {
+                                            let target = agent.target.clone();
+                                            if tmux_client.send_keys(&target, &input).is_ok() {
+                                                let _ = tmux_client.send_keys(&target, "Enter");
+                                                sent += 1;
+                                            }
+                                        }
+                                    }
+                                    if sent > 0 {
+                                        state.flash(format!("Sent to {} agent(s)", sent));
+                                    }
+                                }
+                            }
                             Action::SendNumber(num) => {
                                 if let Some(agent) = state.selected_agent() {
                                     let target = agent.target.clone();
@@ -514,6 +533,8 @@ fn map_key_to_action(code: KeyCode, modifiers: KeyModifiers, state: &AppState) -
             // Shift+Enter or Alt+Enter inserts newline
             KeyCode::Enter if modifiers.contains(KeyModifiers::SHIFT) => Action::InputNewline,
             KeyCode::Enter if modifiers.contains(KeyModifiers::ALT) => Action::InputNewline,
+            // Ctrl+Enter sends to all selected agents
+            KeyCode::Enter if modifiers.contains(KeyModifiers::CONTROL) => Action::SendInputToAll,
             KeyCode::Enter => Action::SendInput,
             KeyCode::Backspace => Action::InputBackspace,
             // Cursor movement
