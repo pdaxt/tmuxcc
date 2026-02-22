@@ -112,6 +112,8 @@ pub struct AppState {
     pub queue_tasks: Vec<AgentOSQueueTask>,
     /// Whether AgentOS is connected
     pub agentos_connected: bool,
+    /// Whether queue panel is shown
+    pub show_queue: bool,
 }
 
 impl AppState {
@@ -135,6 +137,7 @@ impl AppState {
             system_stats: SystemStats::new(),
             queue_tasks: Vec::new(),
             agentos_connected: false,
+            show_queue: true,
         }
     }
 
@@ -334,6 +337,11 @@ impl AppState {
     /// Toggles summary detail (TODOs and Tools) display
     pub fn toggle_summary_detail(&mut self) {
         self.show_summary_detail = !self.show_summary_detail;
+    }
+
+    /// Toggles queue panel visibility
+    pub fn toggle_queue(&mut self) {
+        self.show_queue = !self.show_queue;
     }
 
     /// Sets an error message

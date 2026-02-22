@@ -22,7 +22,7 @@ use crate::tmux::TmuxClient;
 
 use super::components::{
     AgentTreeWidget, FooterWidget, HeaderWidget, HelpWidget, InputWidget, PanePreviewWidget,
-    SubagentLogWidget,
+    QueuePanelWidget, SubagentLogWidget,
 };
 use super::Layout;
 
@@ -109,7 +109,7 @@ async fn run_loop(
         // Draw UI
         terminal.draw(|frame| {
             let size = frame.area();
-            let main_chunks = Layout::main_layout(size);
+            let main_chunks = Layout::main_layout_with_queue(size, state.show_queue);
 
             // Header
             HeaderWidget::render(frame, main_chunks[0], state);
@@ -152,8 +152,13 @@ async fn run_loop(
                 InputWidget::render(frame, input_area, state);
             }
 
+            // Queue panel (only when visible)
+            if state.show_queue {
+                QueuePanelWidget::render(frame, main_chunks[2], state);
+            }
+
             // Footer
-            FooterWidget::render(frame, main_chunks[2], state);
+            FooterWidget::render(frame, main_chunks[3], state);
 
             // Help overlay
             if state.show_help {
@@ -189,8 +194,8 @@ async fn run_loop(
                     if let Event::Mouse(mouse) = event {
                         let size = terminal.size()?;
                         let area = ratatui::layout::Rect::new(0, 0, size.width, size.height);
-                        let main_chunks = Layout::main_layout(area);
-                        let footer_area = main_chunks[2];
+                        let main_chunks = Layout::main_layout_with_queue(area, state.show_queue);
+                        let footer_area = main_chunks[3];
                         let (sidebar, _, _, input_area) = Layout::content_layout_with_input(
                             main_chunks[1], state.sidebar_width, 3, state.show_summary_detail
                         );
@@ -460,6 +465,9 @@ async fn run_loop(
                             Action::ScrollDown => {
                                 state.select_next();
                             }
+                            Action::ToggleQueue => {
+                                state.toggle_queue();
+                            }
                             Action::None => {}
                         }
                     }
@@ -540,6 +548,7 @@ fn map_key_to_action(code: KeyCode, modifiers: KeyModifiers, state: &AppState) -
         KeyCode::Char('<') => Action::SidebarNarrower,
         KeyCode::Char('>') => Action::SidebarWider,
 
+        KeyCode::Char('Q') => Action::ToggleQueue,
         KeyCode::Char('h') | KeyCode::Char('?') => Action::ShowHelp,
 
         KeyCode::Esc => {

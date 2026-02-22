@@ -95,6 +95,14 @@ impl HelpWidget {
                 Span::styled("Toggle TODO/Tools display", desc_style),
             ]),
             Line::from(vec![
+                Span::styled("  Q        ", key_style),
+                Span::styled("Toggle queue panel", desc_style),
+            ]),
+            Line::from(vec![
+                Span::styled("  < / >    ", key_style),
+                Span::styled("Resize sidebar", desc_style),
+            ]),
+            Line::from(vec![
                 Span::styled("  r        ", key_style),
                 Span::styled("Refresh / clear error", desc_style),
             ]),

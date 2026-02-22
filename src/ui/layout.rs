@@ -4,14 +4,21 @@ use ratatui::layout::{Constraint, Direction, Rect};
 pub struct Layout;
 
 impl Layout {
-    /// Creates the main layout with header, content, and footer
+    /// Creates the main layout with header, content, optional queue, and footer
     pub fn main_layout(area: Rect) -> Vec<Rect> {
+        Self::main_layout_with_queue(area, true)
+    }
+
+    /// Creates the main layout with configurable queue visibility
+    pub fn main_layout_with_queue(area: Rect, show_queue: bool) -> Vec<Rect> {
+        let queue_height = if show_queue { 8 } else { 0 };
         ratatui::layout::Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3), // Header
-                Constraint::Min(10),   // Content area
-                Constraint::Length(1), // Footer (1 line, no border)
+                Constraint::Length(3),            // Header
+                Constraint::Min(10),             // Content area (agents + preview)
+                Constraint::Length(queue_height), // Queue panel (0 when hidden)
+                Constraint::Length(1),            // Footer (1 line, no border)
             ])
             .split(area)
             .to_vec()

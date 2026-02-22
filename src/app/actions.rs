@@ -65,6 +65,8 @@ pub enum Action {
     ScrollUp,
     /// Scroll down in sidebar
     ScrollDown,
+    /// Toggle queue panel visibility
+    ToggleQueue,
     /// No action (used for unbound keys)
     None,
 }
@@ -105,6 +107,7 @@ impl Action {
             Action::SelectAgent(_) => "Select agent",
             Action::ScrollUp => "Scroll up",
             Action::ScrollDown => "Scroll down",
+            Action::ToggleQueue => "Toggle queue panel",
             Action::None => "",
         }
     }
