@@ -1,15 +1,18 @@
 [package]
-name = "tmuxcc"
-version = "0.1.7"
+name = "agentos-tui"
+version = "0.2.0"
 edition = "2021"
-description = "AI Agent Dashboard for tmux - Monitor Claude Code, OpenCode, Codex CLI, and Gemini CLI"
-authors = ["TmuxCC Contributors"]
+description = "AgentOS Terminal - Mission control for AI agent orchestration. Fork of tmuxcc."
+authors = ["AgentOS Contributors", "TmuxCC Contributors"]
 license = "MIT"
-repository = "https://github.com/nyanko3141592/tmuxcc"
-homepage = "https://github.com/nyanko3141592/tmuxcc"
+repository = "https://github.com/pdaxt/tmuxcc"
 readme = "README.md"
-keywords = ["tmux", "ai", "dashboard", "terminal", "cli"]
+keywords = ["tmux", "ai", "dashboard", "terminal", "agents", "orchestration"]
 categories = ["command-line-utilities", "development-tools"]
+
+[[bin]]
+name = "agentos-tui"
+path = "src/main.rs"
 
 [dependencies]
 ratatui = "0.29"
@@ -21,12 +24,14 @@ regex = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 toml = "0.8"
 chrono = "0.4"
 dirs = "5"
 parking_lot = "0.12"
 unicode-width = "0.1"
 sysinfo = "0.32"
+reqwest = { version = "0.12", features = ["json"] }
 
 [dev-dependencies]
 tempfile = "3"

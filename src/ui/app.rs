@@ -14,6 +14,7 @@ use crossterm::{
 use ratatui::{backend::CrosstermBackend, Terminal};
 use tokio::sync::mpsc;
 
+use crate::agentos::AgentOSClient;
 use crate::app::{Action, AppState, Config};
 use crate::monitor::{MonitorTask, SystemStatsCollector};
 use crate::parsers::ParserRegistry;
@@ -43,8 +44,11 @@ pub async fn run_app(config: Config) -> Result<()> {
 
     // Check if tmux is available
     if !tmux_client.is_available() {
-        state.set_error("tmux is not running".to_string());
+        state.set_error("tmux is not running (agents from AgentOS API will still appear)".to_string());
     }
+
+    // Create AgentOS client if URL configured
+    let agentos_client = config.agentos_url.as_ref().map(|url| AgentOSClient::new(Some(url.clone())));
 
     // Create channel for monitor updates
     let (tx, mut rx) = mpsc::channel(32);
@@ -53,6 +57,7 @@ pub async fn run_app(config: Config) -> Result<()> {
     let monitor = MonitorTask::new(
         tmux_client.clone(),
         parser_registry.clone(),
+        agentos_client,
         tx,
         Duration::from_millis(config.poll_interval_ms),
     );
@@ -163,6 +168,8 @@ async fn run_loop(
             // Handle monitor updates
             Some(update) = rx.recv() => {
                 state.agents = update.agents;
+                state.queue_tasks = update.queue_tasks;
+                state.agentos_connected = update.agentos_connected;
                 // Ensure selected index is valid
                 if state.selected_index >= state.agents.root_agents.len() {
                     state.selected_index = state.agents.root_agents.len().saturating_sub(1);

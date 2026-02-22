@@ -3,37 +3,39 @@ use clap::Parser;
 use std::path::PathBuf;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use tmuxcc::app::Config;
-use tmuxcc::ui::run_app;
+use agentos_tui::app::Config;
+use agentos_tui::ui::run_app;
 
 #[derive(Parser)]
-#[command(name = "tmuxcc")]
+#[command(name = "agentos-tui")]
 #[command(author, version, about, long_about = None)]
-#[command(
-    about = "AI Agent Dashboard for tmux - Claude Code, OpenCode, Codex CLI, Gemini CLI を一元管理"
-)]
+#[command(about = "AgentOS Terminal - Mission control for AI agent orchestration")]
 struct Cli {
-    /// ポーリング間隔（ミリ秒）
+    /// Polling interval (milliseconds)
     #[arg(short, long, default_value = "500", value_name = "MS")]
     poll_interval: u64,
 
-    /// ペインからキャプチャする行数
+    /// Lines to capture from each pane
     #[arg(short, long, default_value = "100", value_name = "LINES")]
     capture_lines: u32,
 
-    /// 設定ファイルのパス
+    /// Config file path
     #[arg(short = 'f', long, value_name = "FILE")]
     config: Option<PathBuf>,
 
-    /// デバッグログを tmuxcc.log に出力
+    /// AgentOS API URL (default: http://localhost:3100)
+    #[arg(long, default_value = "http://localhost:3100", value_name = "URL")]
+    agentos_url: String,
+
+    /// Write debug logs to agentos-tui.log
     #[arg(short, long)]
     debug: bool,
 
-    /// 設定ファイルのパスを表示
+    /// Show config file path
     #[arg(long)]
     show_config_path: bool,
 
-    /// デフォルト設定ファイルを生成
+    /// Generate default config file
     #[arg(long)]
     init_config: bool,
 }
@@ -47,7 +49,7 @@ async fn main() -> Result<()> {
         if let Some(path) = Config::default_path() {
             println!("{}", path.display());
         } else {
-            println!("設定ディレクトリが見つかりません");
+            println!("Config directory not found");
         }
         return Ok(());
     }
@@ -56,18 +58,18 @@ async fn main() -> Result<()> {
     if cli.init_config {
         let config = Config::default();
         if let Err(e) = config.save() {
-            eprintln!("設定ファイルの作成に失敗: {}", e);
+            eprintln!("Failed to create config: {}", e);
             std::process::exit(1);
         }
         if let Some(path) = Config::default_path() {
-            println!("設定ファイルを作成しました: {}", path.display());
+            println!("Config created: {}", path.display());
         }
         return Ok(());
     }
 
     // Setup logging
     if cli.debug {
-        let log_file = std::fs::File::create("tmuxcc.log")?;
+        let log_file = std::fs::File::create("agentos-tui.log")?;
         let file_layer = tracing_subscriber::fmt::layer()
             .with_writer(log_file)
             .with_ansi(false);
@@ -81,7 +83,7 @@ async fn main() -> Result<()> {
     // Load config (from file or CLI args)
     let mut config = if let Some(config_path) = &cli.config {
         Config::load_from(config_path).unwrap_or_else(|e| {
-            eprintln!("設定ファイルの読み込みに失敗: {}", e);
+            eprintln!("Failed to load config: {}", e);
             std::process::exit(1);
         })
     } else {
@@ -91,6 +93,7 @@ async fn main() -> Result<()> {
     // CLI args override config file
     config.poll_interval_ms = cli.poll_interval;
     config.capture_lines = cli.capture_lines;
+    config.agentos_url = Some(cli.agentos_url);
 
     // Run the application
     run_app(config).await

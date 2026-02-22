@@ -15,11 +15,13 @@ impl HeaderWidget {
         let total = state.agents.root_agents.len();
         let processing = state.agents.processing_count();
         let pending = state.agents.active_count();
+        let queue_pending = state.queue_tasks.iter().filter(|t| t.status == "pending").count();
+        let queue_running = state.queue_tasks.iter().filter(|t| t.status == "running").count();
         let time = Local::now().format("%H:%M").to_string();
 
         let mut spans = vec![
             Span::styled(
-                " TmuxCC ",
+                " AgentOS ",
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
@@ -40,15 +42,24 @@ impl HeaderWidget {
             ));
         }
 
-        // Pending count
+        // Pending approvals
         spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
         if pending > 0 {
             spans.push(Span::styled(
-                format!(" ⚠ {} pending ", pending),
+                format!(" {} pending ", pending),
                 Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ));
         } else {
-            spans.push(Span::styled(" ✓ ready ", Style::default().fg(Color::Green)));
+            spans.push(Span::styled(" ready ", Style::default().fg(Color::Green)));
+        }
+
+        // Queue info (if connected to AgentOS)
+        if state.agentos_connected {
+            spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(
+                format!(" Q:{}/{} ", queue_running, queue_pending + queue_running),
+                Style::default().fg(Color::Magenta),
+            ));
         }
 
         // System stats: CPU
@@ -84,6 +95,14 @@ impl HeaderWidget {
             Style::default().fg(mem_color),
         ));
 
+        // AgentOS connection status
+        spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
+        if state.agentos_connected {
+            spans.push(Span::styled(" OS ", Style::default().fg(Color::Green)));
+        } else {
+            spans.push(Span::styled(" OS ", Style::default().fg(Color::DarkGray)));
+        }
+
         // Time
         spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
         spans.push(Span::styled(
@@ -95,7 +114,7 @@ impl HeaderWidget {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::Gray));
+            .border_style(Style::default().fg(Color::Cyan));
 
         let paragraph = Paragraph::new(line).block(block);
         frame.render_widget(paragraph, area);

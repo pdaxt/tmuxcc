@@ -1,4 +1,5 @@
 pub mod agents;
+pub mod agentos;
 pub mod app;
 pub mod monitor;
 pub mod parsers;

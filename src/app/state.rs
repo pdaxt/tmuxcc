@@ -1,4 +1,5 @@
 use crate::agents::MonitoredAgent;
+use crate::agentos::AgentOSQueueTask;
 use crate::monitor::SystemStats;
 use std::collections::HashSet;
 use std::time::Instant;
@@ -107,6 +108,10 @@ pub struct AppState {
     last_tick: Instant,
     /// System resource statistics
     pub system_stats: SystemStats,
+    /// AgentOS queue tasks
+    pub queue_tasks: Vec<AgentOSQueueTask>,
+    /// Whether AgentOS is connected
+    pub agentos_connected: bool,
 }
 
 impl AppState {
@@ -128,6 +133,8 @@ impl AppState {
             tick: 0,
             last_tick: Instant::now(),
             system_stats: SystemStats::new(),
+            queue_tasks: Vec::new(),
+            agentos_connected: false,
         }
     }
 

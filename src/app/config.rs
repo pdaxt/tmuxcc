@@ -16,6 +16,10 @@ pub struct Config {
     /// Custom agent patterns (command -> agent type mapping)
     #[serde(default)]
     pub agent_patterns: Vec<AgentPattern>,
+
+    /// AgentOS API URL (e.g. http://localhost:3100)
+    #[serde(default)]
+    pub agentos_url: Option<String>,
 }
 
 fn default_poll_interval() -> u64 {
@@ -41,6 +45,7 @@ impl Default for Config {
             poll_interval_ms: default_poll_interval(),
             capture_lines: default_capture_lines(),
             agent_patterns: Vec::new(),
+            agentos_url: None,
         }
     }
 }
@@ -48,7 +53,7 @@ impl Default for Config {
 impl Config {
     /// Returns the default config file path
     pub fn default_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|p| p.join("tmuxcc").join("config.toml"))
+        dirs::config_dir().map(|p| p.join("agentos-tui").join("config.toml"))
     }
 
     /// Loads config from the default path or returns defaults
