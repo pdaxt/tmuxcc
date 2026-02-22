@@ -9,6 +9,7 @@ use ratatui::{
 use crate::app::App;
 use crate::config;
 use crate::capacity;
+use crate::queue;
 use super::widgets;
 
 /// Snapshot of pane data for rendering (no locks held during draw)
@@ -38,6 +39,9 @@ pub struct DashboardData {
     pub selected_output: String,
     pub selected_screen: String,
     pub log_lines: Vec<String>,
+    pub queue_lines: Vec<(String, String, String, String)>, // (status, priority, project, task)
+    pub queue_pending: usize,
+    pub queue_running: usize,
 }
 
 /// Collect all data in one pass (lock once, release)
@@ -91,6 +95,30 @@ pub fn collect_data(app: &App, selected: u8) -> DashboardData {
 
     let cap = capacity::load_capacity();
 
+    // Queue data
+    let q = queue::load_queue();
+    let mut queue_pending = 0usize;
+    let mut queue_running = 0usize;
+    let queue_lines: Vec<(String, String, String, String)> = q.tasks.iter()
+        .filter(|t| t.status != queue::QueueStatus::Done)
+        .map(|t| {
+            match t.status {
+                queue::QueueStatus::Pending => queue_pending += 1,
+                queue::QueueStatus::Running => queue_running += 1,
+                _ => {}
+            }
+            let status = match t.status {
+                queue::QueueStatus::Pending => "PEND",
+                queue::QueueStatus::Running => "RUN ",
+                queue::QueueStatus::Failed => "FAIL",
+                queue::QueueStatus::Blocked => "BLOK",
+                queue::QueueStatus::Done => "DONE",
+            };
+            let proj = t.project.split('/').last().unwrap_or(&t.project).to_string();
+            (status.to_string(), format!("P{}", t.priority), proj, t.task.clone())
+        })
+        .collect();
+
     DashboardData {
         panes,
         selected,
@@ -103,6 +131,9 @@ pub fn collect_data(app: &App, selected: u8) -> DashboardData {
         selected_output,
         selected_screen,
         log_lines,
+        queue_lines,
+        queue_pending,
+        queue_running,
     }
 }
 
@@ -114,15 +145,25 @@ pub fn render(f: &mut Frame, data: &DashboardData) {
             Constraint::Length(3),  // Header bar
             Constraint::Length(11), // Pane table (9 rows + 2 border)
             Constraint::Min(8),    // PTY output
-            Constraint::Length(7),  // Activity log
+            Constraint::Length(8),  // Queue + Activity (split horizontal)
             Constraint::Length(1),  // Help bar
         ])
         .split(f.area());
 
+    // Split bottom panel horizontally: queue | activity
+    let bottom = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(55), // Queue
+            Constraint::Percentage(45), // Activity log
+        ])
+        .split(chunks[3]);
+
     render_header(f, chunks[0], data);
     render_pane_table(f, chunks[1], data);
     render_pty_output(f, chunks[2], data);
-    render_activity_log(f, chunks[3], data);
+    render_queue(f, bottom[0], data);
+    render_activity_log(f, bottom[1], data);
     render_help_bar(f, chunks[4]);
 }
 
@@ -257,6 +298,38 @@ fn render_pty_output(f: &mut Frame, area: Rect, data: &DashboardData) {
     let p = Paragraph::new(lines)
         .block(block)
         .wrap(Wrap { trim: false });
+    f.render_widget(p, area);
+}
+
+fn render_queue(f: &mut Frame, area: Rect, data: &DashboardData) {
+    let title = format!(" Queue ({} pending, {} running) ", data.queue_pending, data.queue_running);
+    let available = area.height.saturating_sub(2) as usize;
+
+    let lines: Vec<Line> = if data.queue_lines.is_empty() {
+        vec![Line::from(Span::styled("  No queued tasks", Style::default().fg(Color::DarkGray)))]
+    } else {
+        data.queue_lines.iter().take(available).map(|(status, pri, proj, task)| {
+            let sc = match status.trim() {
+                "RUN" => Color::Green,
+                "PEND" => Color::Yellow,
+                "FAIL" => Color::Red,
+                "BLOK" => Color::Magenta,
+                _ => Color::DarkGray,
+            };
+            Line::from(vec![
+                Span::styled(format!(" {} ", status), Style::default().fg(sc).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("{} ", pri), Style::default().fg(Color::Cyan)),
+                Span::styled(format!("{:<12}", widgets::truncate_pub(proj, 12)), Style::default().fg(Color::White)),
+                Span::styled(widgets::truncate_pub(task, 30), Style::default().fg(Color::DarkGray)),
+            ])
+        }).collect()
+    };
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow));
+    let p = Paragraph::new(lines).block(block);
     f.render_widget(p, area);
 }
 

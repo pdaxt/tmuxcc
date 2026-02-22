@@ -120,6 +120,23 @@ select{background:#21262d;color:var(--text);border:1px solid var(--border);paddi
 .burndown-wrap{position:relative}
 canvas{width:100%;display:block}
 
+/* Queue table */
+.q-table{width:100%;border-collapse:collapse;font-size:12px}
+.q-table th{text-align:left;font-size:10px;text-transform:uppercase;color:var(--muted);padding:6px 8px;border-bottom:1px solid var(--border);letter-spacing:.4px;font-weight:600}
+.q-table td{padding:6px 8px;border-bottom:1px solid #21262d}
+.q-table tr:hover{background:#21262d}
+.q-id{font-family:monospace;color:var(--dim);font-size:10px}
+.q-status{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;padding:1px 6px;border-radius:3px}
+.q-pending{background:#d2992222;color:var(--yellow)}
+.q-running{background:#3fb95022;color:var(--green)}
+.q-done{background:#58a6ff22;color:var(--blue)}
+.q-failed{background:#f8514922;color:var(--red)}
+.q-blocked{background:#a371f722;color:var(--purple)}
+.q-priority{font-size:10px;font-weight:700;display:inline-block;width:16px;height:16px;line-height:16px;text-align:center;border-radius:50%}
+.q-p1{background:var(--red);color:#000}.q-p2{background:var(--yellow);color:#000}.q-p3{background:var(--blue);color:#000}
+.q-p4{background:var(--dim);color:var(--text)}.q-p5{background:#21262d;color:var(--muted)}
+.q-empty{text-align:center;padding:20px;color:var(--dim);font-size:12px}
+
 /* Scrollbar */
 ::-webkit-scrollbar{width:6px;height:6px}
 ::-webkit-scrollbar-track{background:transparent}
@@ -155,6 +172,11 @@ canvas{width:100%;display:block}
       <div class="log-list" id="logs"></div>
     </div>
   </div>
+</div>
+
+<div class="section" id="queue-section">
+  <div class="section-title">Task Queue <span id="queue-summary" style="font-weight:400;color:var(--muted);font-size:11px"></span></div>
+  <div id="queue-table"></div>
 </div>
 
 <div class="section" id="sprint-section"></div>
@@ -317,6 +339,35 @@ async function renderLogs(){
   el.innerHTML=html;
 }
 
+// === Queue ===
+async function renderQueue(){
+  const d=await fetchJSON('/api/queue');
+  if(!d)return;
+  const sumEl=document.getElementById('queue-summary');
+  const s=d.summary;
+  sumEl.textContent=`${s.pending} pending · ${s.running} running · ${s.done} done${s.failed?' · '+s.failed+' failed':''}`;
+  const el=document.getElementById('queue-table');
+  // Only show non-done tasks, plus last 5 done
+  const active=d.tasks.filter(t=>t.status!=='done');
+  const done=d.tasks.filter(t=>t.status==='done').slice(-5).reverse();
+  const show=[...active,...done];
+  if(!show.length){el.innerHTML='<div class="q-empty">Queue empty — add tasks with os_queue_add</div>';return;}
+  let html='<table class="q-table"><thead><tr><th>ID</th><th>P</th><th>Status</th><th>Project</th><th>Task</th><th>Role</th><th>Pane</th><th>Depends</th></tr></thead><tbody>';
+  for(const t of show){
+    const sc=t.status==='pending'?'q-pending':t.status==='running'?'q-running':t.status==='done'?'q-done':t.status==='failed'?'q-failed':'q-blocked';
+    const pc='q-p'+(t.priority||3);
+    const deps=t.depends_on&&t.depends_on.length?t.depends_on.join(', '):'—';
+    const pane=t.pane?'P'+t.pane:'—';
+    const proj=(t.project||'').split('/').pop();
+    html+=`<tr><td class="q-id">${t.id}</td><td><span class="q-priority ${pc}">${t.priority}</span></td>
+      <td><span class="q-status ${sc}">${t.status}</span></td>
+      <td>${proj}</td><td>${(t.task||'').slice(0,40)}</td><td><span class="badge badge-role">${t.role||'dev'}</span></td>
+      <td>${pane}</td><td class="q-id">${deps}</td></tr>`;
+  }
+  html+='</tbody></table>';
+  el.innerHTML=html;
+}
+
 // === Board ===
 async function renderBoard(){
   const d=await fetchJSON(`/api/board?space=${currentSpace}`);
@@ -404,7 +455,7 @@ function connectSSE(){
 // === Refresh ===
 async function refresh(){
   currentSpace=document.getElementById('space-select').value;
-  await Promise.all([renderGauges(),renderPanes(),renderRoles(),renderLogs(),renderBoard(),renderSprint()]);
+  await Promise.all([renderGauges(),renderPanes(),renderRoles(),renderLogs(),renderQueue(),renderBoard(),renderSprint()]);
 }
 
 async function init(){

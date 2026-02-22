@@ -115,6 +115,10 @@ pub fn pane_line<'a>(
     Line::from(spans)
 }
 
+pub fn truncate_pub(s: &str, max: usize) -> String {
+    truncate(s, max)
+}
+
 fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()

@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 use crate::app::App;
 use crate::config;
 use crate::capacity;
+use crate::queue;
 
 type AppState = Arc<App>;
 
@@ -491,6 +492,60 @@ pub async fn get_roles() -> Json<Value> {
     let cfg_path = config::capacity_root().join("config.json");
     let cfg = crate::state::persistence::read_json(&cfg_path);
     Json(cfg.get("roles").cloned().unwrap_or_else(|| json!({})))
+}
+
+/// GET /api/queue — Task queue with status counts
+pub async fn get_queue() -> Json<Value> {
+    let q = queue::load_queue();
+    let cfg = queue::load_auto_config();
+
+    let mut pending = 0usize;
+    let mut running = 0usize;
+    let mut done = 0usize;
+    let mut failed = 0usize;
+    let mut blocked = 0usize;
+
+    let tasks: Vec<Value> = q.tasks.iter().map(|t| {
+        match t.status {
+            queue::QueueStatus::Pending => pending += 1,
+            queue::QueueStatus::Running => running += 1,
+            queue::QueueStatus::Done => done += 1,
+            queue::QueueStatus::Failed => failed += 1,
+            queue::QueueStatus::Blocked => blocked += 1,
+        }
+        json!({
+            "id": t.id,
+            "project": t.project,
+            "role": t.role,
+            "task": t.task,
+            "priority": t.priority,
+            "status": t.status,
+            "pane": t.pane,
+            "added_at": t.added_at,
+            "started_at": t.started_at,
+            "completed_at": t.completed_at,
+            "result": t.result,
+            "depends_on": t.depends_on,
+        })
+    }).collect();
+
+    Json(json!({
+        "tasks": tasks,
+        "summary": {
+            "pending": pending,
+            "running": running,
+            "done": done,
+            "failed": failed,
+            "blocked": blocked,
+            "total": tasks.len(),
+        },
+        "config": {
+            "max_parallel": cfg.max_parallel,
+            "reserved_panes": cfg.reserved_panes,
+            "auto_complete": cfg.auto_complete,
+            "auto_assign": cfg.auto_assign,
+        }
+    }))
 }
 
 // === Helpers ===
