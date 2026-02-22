@@ -102,6 +102,8 @@ pub struct AppState {
     pub should_quit: bool,
     /// Last error message (if any)
     pub last_error: Option<String>,
+    /// Flash notification (auto-clears after N ticks)
+    pub flash_message: Option<(String, usize)>,
     /// Sidebar width in percentage (15-70)
     pub sidebar_width: u16,
     /// Animation tick counter
@@ -134,6 +136,7 @@ impl AppState {
             preview_scroll: 0,
             should_quit: false,
             last_error: None,
+            flash_message: None,
             sidebar_width: 35,
             tick: 0,
             last_tick: Instant::now(),
@@ -150,6 +153,7 @@ impl AppState {
         if self.last_tick.elapsed().as_millis() >= TICK_INTERVAL_MS {
             self.tick = self.tick.wrapping_add(1);
             self.last_tick = Instant::now();
+            self.clear_expired_flash();
         }
     }
 
@@ -373,6 +377,20 @@ impl AppState {
     /// Clears the error message
     pub fn clear_error(&mut self) {
         self.last_error = None;
+    }
+
+    /// Show a flash notification that auto-clears after ~3 seconds
+    pub fn flash(&mut self, message: String) {
+        self.flash_message = Some((message, self.tick + 36)); // ~3s at 12fps
+    }
+
+    /// Check and clear expired flash messages (call in tick)
+    pub fn clear_expired_flash(&mut self) {
+        if let Some((_, expires)) = &self.flash_message {
+            if self.tick >= *expires {
+                self.flash_message = None;
+            }
+        }
     }
 }
 

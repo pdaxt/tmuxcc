@@ -124,7 +124,16 @@ impl FooterWidget {
                 ));
             }
 
-            if let Some(error) = &state.last_error {
+            // Flash notification (takes priority over error)
+            if let Some((msg, _)) = &state.flash_message {
+                spans.push(Span::styled(" │ ", sep));
+                spans.push(Span::styled(
+                    format!("✓ {}", truncate_error(msg, 40)),
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                ));
+            } else if let Some(error) = &state.last_error {
                 spans.push(Span::styled(" │ ", sep));
                 spans.push(Span::styled(
                     format!("✗ {}", truncate_error(error, 30)),

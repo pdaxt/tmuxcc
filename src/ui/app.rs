@@ -321,8 +321,9 @@ async fn run_loop(
                             }
                             Action::Approve => {
                                 let indices = state.get_operation_indices();
-                                for idx in indices {
-                                    if let Some(agent) = state.agents.get_agent(idx) {
+                                let mut approved = 0usize;
+                                for idx in &indices {
+                                    if let Some(agent) = state.agents.get_agent(*idx) {
                                         if agent.status.needs_attention() {
                                             let target = agent.target.clone();
                                             if let Err(e) = tmux_client.send_keys(&target, "y") {
@@ -333,8 +334,12 @@ async fn run_loop(
                                                 state.set_error(format!("Failed to send Enter: {}", e));
                                                 break;
                                             }
+                                            approved += 1;
                                         }
                                     }
+                                }
+                                if approved > 0 {
+                                    state.flash(format!("Approved {} agent(s)", approved));
                                 }
                                 state.clear_selection();
                             }
@@ -429,11 +434,14 @@ async fn run_loop(
                                 if !input.is_empty() {
                                     if let Some(agent) = state.selected_agent() {
                                         let target = agent.target.clone();
+                                        let agent_path = agent.abbreviated_path();
                                         // Send the input text
                                         if let Err(e) = tmux_client.send_keys(&target, &input) {
                                             state.set_error(format!("Failed to send input: {}", e));
                                         } else if let Err(e) = tmux_client.send_keys(&target, "Enter") {
                                             state.set_error(format!("Failed to send Enter: {}", e));
+                                        } else {
+                                            state.flash(format!("Sent to {}", agent_path));
                                         }
                                     }
                                 }
