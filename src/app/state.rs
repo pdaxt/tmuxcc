@@ -96,6 +96,8 @@ pub struct AppState {
     pub show_subagent_log: bool,
     /// Whether summary detail (TODOs and Tools) is shown
     pub show_summary_detail: bool,
+    /// Preview scroll offset (0 = bottom/latest, positive = scrolled up)
+    pub preview_scroll: usize,
     /// Whether the application should quit
     pub should_quit: bool,
     /// Last error message (if any)
@@ -129,6 +131,7 @@ impl AppState {
             show_help: false,
             show_subagent_log: false,
             show_summary_detail: true,
+            preview_scroll: 0,
             should_quit: false,
             last_error: None,
             sidebar_width: 35,
@@ -266,6 +269,7 @@ impl AppState {
     pub fn select_next(&mut self) {
         if !self.agents.root_agents.is_empty() {
             self.selected_index = (self.selected_index + 1) % self.agents.root_agents.len();
+            self.preview_scroll = 0;
         }
     }
 
@@ -277,6 +281,7 @@ impl AppState {
             } else {
                 self.selected_index -= 1;
             }
+            self.preview_scroll = 0;
         }
     }
 
@@ -284,6 +289,7 @@ impl AppState {
     pub fn select_agent(&mut self, index: usize) {
         if index < self.agents.root_agents.len() {
             self.selected_index = index;
+            self.preview_scroll = 0;
         }
     }
 
@@ -337,6 +343,21 @@ impl AppState {
     /// Toggles summary detail (TODOs and Tools) display
     pub fn toggle_summary_detail(&mut self) {
         self.show_summary_detail = !self.show_summary_detail;
+    }
+
+    /// Scroll preview up by N lines
+    pub fn preview_scroll_up(&mut self, lines: usize) {
+        self.preview_scroll = self.preview_scroll.saturating_add(lines);
+    }
+
+    /// Scroll preview down by N lines (toward bottom)
+    pub fn preview_scroll_down(&mut self, lines: usize) {
+        self.preview_scroll = self.preview_scroll.saturating_sub(lines);
+    }
+
+    /// Reset preview scroll to bottom (latest output)
+    pub fn preview_scroll_reset(&mut self) {
+        self.preview_scroll = 0;
     }
 
     /// Toggles queue panel visibility

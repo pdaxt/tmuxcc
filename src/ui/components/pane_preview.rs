@@ -268,15 +268,28 @@ impl PanePreviewWidget {
         let available_lines = area.height.saturating_sub(2) as usize;
 
         let (title, lines) = if let Some(agent) = agent {
-            let title = format!(" {} ({}) ", agent.target, agent.agent_type);
+            let content_lines: Vec<&str> = agent.last_content.lines().collect();
+            let total_lines = content_lines.len();
+            let scroll = state.preview_scroll;
+
+            // Calculate visible window with scroll offset
+            let end = total_lines.saturating_sub(scroll);
+            let start = end.saturating_sub(available_lines);
+
+            // Build title with scroll indicator
+            let title = if scroll > 0 {
+                format!(
+                    " {} ({}) [{}-{}/{}] ",
+                    agent.target, agent.agent_type,
+                    start + 1, end, total_lines
+                )
+            } else {
+                format!(" {} ({}) ", agent.target, agent.agent_type)
+            };
 
             let mut styled_lines: Vec<Line> = Vec::new();
 
-            // Take enough lines to fill the area
-            let content_lines: Vec<&str> = agent.last_content.lines().collect();
-            let start = content_lines.len().saturating_sub(available_lines);
-
-            for line in &content_lines[start..] {
+            for line in &content_lines[start..end] {
                 let spans = if line.starts_with('+') && !line.starts_with("+++") {
                     vec![Span::styled(*line, Style::default().fg(Color::Green))]
                 } else if line.starts_with('-') && !line.starts_with("---") {
@@ -307,11 +320,17 @@ impl PanePreviewWidget {
             )
         };
 
+        let border_color = if state.preview_scroll > 0 {
+            Color::Yellow
+        } else {
+            Color::Gray
+        };
+
         let block = Block::default()
             .title(title)
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::Gray));
+            .border_style(Style::default().fg(border_color));
 
         let paragraph = Paragraph::new(lines)
             .block(block)

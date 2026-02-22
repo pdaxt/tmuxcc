@@ -67,6 +67,12 @@ pub enum Action {
     ScrollDown,
     /// Toggle queue panel visibility
     ToggleQueue,
+    /// Scroll preview up
+    PreviewScrollUp,
+    /// Scroll preview down
+    PreviewScrollDown,
+    /// Scroll preview to bottom (latest)
+    PreviewScrollBottom,
     /// No action (used for unbound keys)
     None,
 }
@@ -108,6 +114,9 @@ impl Action {
             Action::ScrollUp => "Scroll up",
             Action::ScrollDown => "Scroll down",
             Action::ToggleQueue => "Toggle queue panel",
+            Action::PreviewScrollUp => "Scroll preview up",
+            Action::PreviewScrollDown => "Scroll preview down",
+            Action::PreviewScrollBottom => "Scroll to bottom",
             Action::None => "",
         }
     }

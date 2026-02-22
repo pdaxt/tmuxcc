@@ -1,6 +1,9 @@
 use std::time::Instant;
 use sysinfo::System;
 
+/// Number of CPU history samples to keep for sparkline
+const CPU_HISTORY_LEN: usize = 30;
+
 /// System resource statistics
 #[derive(Debug, Clone)]
 pub struct SystemStats {
@@ -10,6 +13,8 @@ pub struct SystemStats {
     pub memory_used: u64,
     /// Total memory in bytes
     pub memory_total: u64,
+    /// CPU usage history for sparkline (oldest → newest)
+    pub cpu_history: Vec<f32>,
     /// Last update time
     last_update: Instant,
 }
@@ -20,6 +25,7 @@ impl Default for SystemStats {
             cpu_usage: 0.0,
             memory_used: 0,
             memory_total: 0,
+            cpu_history: Vec::with_capacity(CPU_HISTORY_LEN),
             last_update: Instant::now(),
         }
     }
@@ -49,6 +55,18 @@ impl SystemStats {
         )
     }
 
+    /// Render CPU history as a sparkline string
+    pub fn cpu_sparkline(&self) -> String {
+        const BLOCKS: &[char] = &['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+        self.cpu_history
+            .iter()
+            .map(|&v| {
+                let idx = ((v / 100.0) * (BLOCKS.len() - 1) as f32).round() as usize;
+                BLOCKS[idx.min(BLOCKS.len() - 1)]
+            })
+            .collect()
+    }
+
     /// Format bytes as human-readable string
     fn format_bytes(bytes: u64) -> String {
         const GB: u64 = 1024 * 1024 * 1024;
@@ -74,10 +92,12 @@ impl SystemStatsCollector {
         let mut system = System::new_all();
         system.refresh_all();
 
+        let cpu = system.global_cpu_usage();
         let stats = SystemStats {
-            cpu_usage: system.global_cpu_usage(),
+            cpu_usage: cpu,
             memory_used: system.used_memory(),
             memory_total: system.total_memory(),
+            cpu_history: vec![cpu],
             last_update: Instant::now(),
         };
 
@@ -95,6 +115,11 @@ impl SystemStatsCollector {
             self.stats.cpu_usage = self.system.global_cpu_usage();
             self.stats.memory_used = self.system.used_memory();
             self.stats.memory_total = self.system.total_memory();
+            // Push to history, keep bounded
+            self.stats.cpu_history.push(self.stats.cpu_usage);
+            if self.stats.cpu_history.len() > CPU_HISTORY_LEN {
+                self.stats.cpu_history.remove(0);
+            }
             self.stats.last_update = Instant::now();
         }
     }

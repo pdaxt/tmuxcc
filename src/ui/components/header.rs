@@ -71,8 +71,15 @@ impl HeaderWidget {
         } else {
             Color::Green
         };
+        let sparkline = state.system_stats.cpu_sparkline();
+        if !sparkline.is_empty() {
+            spans.push(Span::styled(
+                format!(" {}", sparkline),
+                Style::default().fg(cpu_color),
+            ));
+        }
         spans.push(Span::styled(
-            format!(" CPU {:4.1}% ", state.system_stats.cpu_usage),
+            format!(" {:4.1}% ", state.system_stats.cpu_usage),
             Style::default().fg(cpu_color),
         ));
 

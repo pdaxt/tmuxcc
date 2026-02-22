@@ -99,6 +99,18 @@ impl HelpWidget {
                 Span::styled("Toggle queue panel", desc_style),
             ]),
             Line::from(vec![
+                Span::styled("  C-u/C-d  ", key_style),
+                Span::styled("Scroll preview up/down", desc_style),
+            ]),
+            Line::from(vec![
+                Span::styled("  PgUp/Dn  ", key_style),
+                Span::styled("Scroll preview up/down", desc_style),
+            ]),
+            Line::from(vec![
+                Span::styled("  g        ", key_style),
+                Span::styled("Scroll to bottom (latest)", desc_style),
+            ]),
+            Line::from(vec![
                 Span::styled("  < / >    ", key_style),
                 Span::styled("Resize sidebar", desc_style),
             ]),

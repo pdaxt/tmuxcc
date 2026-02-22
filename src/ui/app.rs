@@ -468,6 +468,15 @@ async fn run_loop(
                             Action::ToggleQueue => {
                                 state.toggle_queue();
                             }
+                            Action::PreviewScrollUp => {
+                                state.preview_scroll_up(5);
+                            }
+                            Action::PreviewScrollDown => {
+                                state.preview_scroll_down(5);
+                            }
+                            Action::PreviewScrollBottom => {
+                                state.preview_scroll_reset();
+                            }
                             Action::None => {}
                         }
                     }
@@ -549,6 +558,11 @@ fn map_key_to_action(code: KeyCode, modifiers: KeyModifiers, state: &AppState) -
         KeyCode::Char('>') => Action::SidebarWider,
 
         KeyCode::Char('Q') => Action::ToggleQueue,
+        KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => Action::PreviewScrollUp,
+        KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => Action::PreviewScrollDown,
+        KeyCode::Char('g') => Action::PreviewScrollBottom,
+        KeyCode::PageUp => Action::PreviewScrollUp,
+        KeyCode::PageDown => Action::PreviewScrollDown,
         KeyCode::Char('h') | KeyCode::Char('?') => Action::ShowHelp,
 
         KeyCode::Esc => {
