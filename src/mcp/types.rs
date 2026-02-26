@@ -480,3 +480,277 @@ pub struct StatusOverviewRequest {
     #[schemars(description = "Filter by project")]
     pub project: Option<String>,
 }
+
+// === TRACKER TOOLS ===
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct IssueCreateRequest {
+    #[schemars(description = "Collab space name (e.g. 'mailforge')")]
+    pub space: String,
+    #[schemars(description = "Issue title")]
+    pub title: String,
+    #[schemars(description = "Type: bug, feature, task, improvement, epic")]
+    pub issue_type: Option<String>,
+    #[schemars(description = "Priority: critical, high, medium, low")]
+    pub priority: Option<String>,
+    #[schemars(description = "Markdown description")]
+    pub description: Option<String>,
+    #[schemars(description = "Assignee")]
+    pub assignee: Option<String>,
+    #[schemars(description = "Milestone name")]
+    pub milestone: Option<String>,
+    #[schemars(description = "Labels for categorization")]
+    pub labels: Option<Vec<String>>,
+    #[schemars(description = "Agent Capacity Units estimate")]
+    pub estimated_acu: Option<f64>,
+    #[schemars(description = "Agent role (pm/architect/developer/qa/devops)")]
+    pub role: Option<String>,
+    #[schemars(description = "Sprint assignment")]
+    pub sprint: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct IssueUpdateFullRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Issue ID (e.g. 'MAIL-1')")]
+    pub issue_id: String,
+    #[schemars(description = "New status")]
+    pub status: Option<String>,
+    #[schemars(description = "New priority")]
+    pub priority: Option<String>,
+    #[schemars(description = "New assignee")]
+    pub assignee: Option<String>,
+    #[schemars(description = "New title")]
+    pub title: Option<String>,
+    #[schemars(description = "New description")]
+    pub description: Option<String>,
+    #[schemars(description = "New milestone")]
+    pub milestone: Option<String>,
+    #[schemars(description = "Add a label")]
+    pub add_label: Option<String>,
+    #[schemars(description = "Remove a label")]
+    pub remove_label: Option<String>,
+    #[schemars(description = "Estimated ACU")]
+    pub estimated_acu: Option<f64>,
+    #[schemars(description = "Actual ACU consumed")]
+    pub actual_acu: Option<f64>,
+    #[schemars(description = "Agent role")]
+    pub role: Option<String>,
+    #[schemars(description = "Sprint")]
+    pub sprint: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct IssueListFilteredRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Filter by status")]
+    pub status: Option<String>,
+    #[schemars(description = "Filter by type")]
+    pub issue_type: Option<String>,
+    #[schemars(description = "Filter by priority")]
+    pub priority: Option<String>,
+    #[schemars(description = "Filter by assignee")]
+    pub assignee: Option<String>,
+    #[schemars(description = "Filter by milestone")]
+    pub milestone: Option<String>,
+    #[schemars(description = "Filter by label")]
+    pub label: Option<String>,
+    #[schemars(description = "Filter by sprint")]
+    pub sprint: Option<String>,
+    #[schemars(description = "Filter by role")]
+    pub role: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct IssueViewRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Issue ID")]
+    pub issue_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct IssueCommentRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Issue ID")]
+    pub issue_id: String,
+    #[schemars(description = "Comment text (markdown)")]
+    pub text: String,
+    #[schemars(description = "Author name")]
+    pub author: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct IssueLinkRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Issue ID")]
+    pub issue_id: String,
+    #[schemars(description = "Link type: doc, commit, or pr")]
+    pub link_type: String,
+    #[schemars(description = "Reference (doc name, commit hash, PR number)")]
+    pub reference: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct IssueCloseRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Issue ID")]
+    pub issue_id: String,
+    #[schemars(description = "Resolution note")]
+    pub resolution: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct MilestoneCreateRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Milestone name")]
+    pub name: String,
+    #[schemars(description = "Description")]
+    pub description: Option<String>,
+    #[schemars(description = "Due date (YYYY-MM-DD)")]
+    pub due_date: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct MilestoneListRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct TimelineGenerateRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Filter by milestone (empty = all)")]
+    pub milestone: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ProcessStartRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Template name")]
+    pub template_name: String,
+    #[schemars(description = "Context variables as JSON object")]
+    pub context: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ProcessUpdateRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Process ID")]
+    pub process_id: String,
+    #[schemars(description = "Step index (0-based)")]
+    pub step_index: usize,
+    #[schemars(description = "Mark done (true) or undone (false)")]
+    pub done: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ProcessListRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ProcessTemplateCreateRequest {
+    #[schemars(description = "Template name")]
+    pub name: String,
+    #[schemars(description = "Markdown checklist with - [ ] items")]
+    pub content: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct BoardViewRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+}
+
+// === CAPACITY TOOLS ===
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CapConfigureRequest {
+    #[schemars(description = "Number of parallel panes")]
+    pub pane_count: Option<u32>,
+    #[schemars(description = "Working hours per day")]
+    pub hours_per_day: Option<f64>,
+    #[schemars(description = "Productivity factor 0.0-1.0")]
+    pub availability_factor: Option<f64>,
+    #[schemars(description = "Max human reviews per day")]
+    pub review_bandwidth: Option<u32>,
+    #[schemars(description = "Max concurrent builds")]
+    pub build_slots: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CapEstimateRequest {
+    #[schemars(description = "Task description")]
+    pub description: String,
+    #[schemars(description = "Complexity: low, medium, high, very_high")]
+    pub complexity: Option<String>,
+    #[schemars(description = "Type: bug, task, feature, improvement, epic")]
+    pub task_type: Option<String>,
+    #[schemars(description = "Role: pm, architect, developer, qa, devops")]
+    pub role: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CapLogWorkRequest {
+    #[schemars(description = "Issue ID")]
+    pub issue_id: String,
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Agent role")]
+    pub role: String,
+    #[schemars(description = "Pane ID")]
+    pub pane_id: Option<String>,
+    #[schemars(description = "ACU consumed")]
+    pub acu_spent: f64,
+    #[schemars(description = "Whether human review needed")]
+    pub review_needed: Option<bool>,
+    #[schemars(description = "Notes")]
+    pub notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CapPlanSprintRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Sprint name (auto if empty)")]
+    pub name: Option<String>,
+    #[schemars(description = "Start date YYYY-MM-DD (default today)")]
+    pub start_date: Option<String>,
+    #[schemars(description = "Working days (default 5)")]
+    pub days: Option<u32>,
+    #[schemars(description = "Comma-separated issue IDs")]
+    pub issue_ids: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CapDashboardRequest {
+    #[schemars(description = "Filter by space")]
+    pub space: Option<String>,
+    #[schemars(description = "Specific sprint ID")]
+    pub sprint_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CapBurndownRequest {
+    #[schemars(description = "Sprint ID (empty = latest active)")]
+    pub sprint_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CapVelocityRequest {
+    #[schemars(description = "Filter by space")]
+    pub space: Option<String>,
+    #[schemars(description = "Number of sprints to analyze")]
+    pub count: Option<usize>,
+}

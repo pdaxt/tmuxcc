@@ -573,6 +573,259 @@ impl AgentOSService {
         let result = crate::multi_agent::status_overview(req.project.as_deref());
         Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
     }
+
+    // === TRACKER TOOLS (15 tools) ===
+
+    #[tool(description = "Create a new issue in a tracker space. Returns issue ID.")]
+    async fn issue_create(
+        &self,
+        Parameters(req): Parameters<IssueCreateRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::tracker::issue_create(
+            &req.space, &req.title,
+            &req.issue_type.unwrap_or_default(), &req.priority.unwrap_or_default(),
+            &req.description.unwrap_or_default(), &req.assignee.unwrap_or_default(),
+            &req.milestone.unwrap_or_default(), &req.labels.unwrap_or_default(),
+            req.estimated_acu.unwrap_or(0.0), &req.role.unwrap_or_default(),
+            &req.sprint.unwrap_or_default(),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Update an issue's fields: status, priority, assignee, labels, ACU, etc.")]
+    async fn issue_update_full(
+        &self,
+        Parameters(req): Parameters<IssueUpdateFullRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::tracker::issue_update_full(
+            &req.space, &req.issue_id,
+            &req.status.unwrap_or_default(), &req.priority.unwrap_or_default(),
+            &req.assignee.unwrap_or_default(), &req.title.unwrap_or_default(),
+            &req.description.unwrap_or_default(), &req.milestone.unwrap_or_default(),
+            &req.add_label.unwrap_or_default(), &req.remove_label.unwrap_or_default(),
+            req.estimated_acu.unwrap_or(0.0), req.actual_acu.unwrap_or(0.0),
+            &req.role.unwrap_or_default(), &req.sprint.unwrap_or_default(),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "List issues with filters: status, type, priority, assignee, milestone, label, sprint, role.")]
+    async fn issue_list_filtered(
+        &self,
+        Parameters(req): Parameters<IssueListFilteredRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::tracker::issue_list_filtered(
+            &req.space, &req.status.unwrap_or_default(), &req.issue_type.unwrap_or_default(),
+            &req.priority.unwrap_or_default(), &req.assignee.unwrap_or_default(),
+            &req.milestone.unwrap_or_default(), &req.label.unwrap_or_default(),
+            &req.sprint.unwrap_or_default(), &req.role.unwrap_or_default(),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "View full details of a single issue including comments and links.")]
+    async fn issue_view(
+        &self,
+        Parameters(req): Parameters<IssueViewRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::tracker::issue_view(&req.space, &req.issue_id);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Add a comment to an issue.")]
+    async fn issue_comment(
+        &self,
+        Parameters(req): Parameters<IssueCommentRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::tracker::issue_comment(
+            &req.space, &req.issue_id, &req.text, &req.author.unwrap_or_else(|| "agent".into()),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Link a doc, commit, or PR to an issue.")]
+    async fn issue_link(
+        &self,
+        Parameters(req): Parameters<IssueLinkRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::tracker::issue_link(&req.space, &req.issue_id, &req.link_type, &req.reference);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Close an issue with a resolution note.")]
+    async fn issue_close(
+        &self,
+        Parameters(req): Parameters<IssueCloseRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::tracker::issue_close(
+            &req.space, &req.issue_id, &req.resolution.unwrap_or_default().as_str(),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Create a milestone for a space with optional due date.")]
+    async fn milestone_create(
+        &self,
+        Parameters(req): Parameters<MilestoneCreateRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::tracker::milestone_create(
+            &req.space, &req.name, &req.description.unwrap_or_default(), &req.due_date.unwrap_or_default(),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "List milestones with progress for a space.")]
+    async fn milestone_list(
+        &self,
+        Parameters(req): Parameters<MilestoneListRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::tracker::milestone_list(&req.space);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Generate a Mermaid Gantt timeline from open issues.")]
+    async fn timeline_generate(
+        &self,
+        Parameters(req): Parameters<TimelineGenerateRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::tracker::timeline_generate(&req.space, &req.milestone.unwrap_or_default());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Start a process from a checklist template. Context vars substitute {{var}} placeholders.")]
+    async fn process_start(
+        &self,
+        Parameters(req): Parameters<ProcessStartRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let ctx = req.context.unwrap_or(serde_json::json!({}));
+        let result = crate::tracker::process_start(&req.space, &req.template_name, &ctx);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Update a process step as done or undone.")]
+    async fn process_update(
+        &self,
+        Parameters(req): Parameters<ProcessUpdateRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::tracker::process_update(
+            &req.space, &req.process_id, req.step_index, req.done.unwrap_or(true),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "List all processes in a space with progress.")]
+    async fn process_list(
+        &self,
+        Parameters(req): Parameters<ProcessListRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::tracker::process_list(&req.space);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Create a checklist template from markdown with - [ ] items.")]
+    async fn process_template_create(
+        &self,
+        Parameters(req): Parameters<ProcessTemplateCreateRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::tracker::process_template_create(&req.name, &req.content);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Kanban board view of all issues in a space grouped by status.")]
+    async fn board_view(
+        &self,
+        Parameters(req): Parameters<BoardViewRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::tracker::board_view(&req.space);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    // === CAPACITY TOOLS (8 tools) ===
+
+    #[tool(description = "Configure capacity: pane count, hours, availability factor, review bandwidth, build slots.")]
+    async fn cap_configure(
+        &self,
+        Parameters(req): Parameters<CapConfigureRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::capacity::cap_configure(
+            req.pane_count, req.hours_per_day, req.availability_factor,
+            req.review_bandwidth, req.build_slots,
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Estimate ACU for a task based on type, complexity, and role.")]
+    async fn cap_estimate(
+        &self,
+        Parameters(req): Parameters<CapEstimateRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::capacity::cap_estimate(
+            &req.description, &req.complexity.unwrap_or_default(),
+            &req.task_type.unwrap_or_default(), &req.role.unwrap_or_default(),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Log work done: ACU spent on an issue with role and review tracking.")]
+    async fn cap_log_work(
+        &self,
+        Parameters(req): Parameters<CapLogWorkRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::capacity::cap_log_work_full(
+            &req.issue_id, &req.space, &req.role, &req.pane_id.unwrap_or_default(),
+            req.acu_spent, req.review_needed.unwrap_or(false), &req.notes.unwrap_or_default(),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Plan a sprint: assign issues, calculate capacity vs load, detect bottlenecks.")]
+    async fn cap_plan_sprint(
+        &self,
+        Parameters(req): Parameters<CapPlanSprintRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::capacity::cap_plan_sprint(
+            &req.space, &req.name.unwrap_or_default(), &req.start_date.unwrap_or_default(),
+            req.days.unwrap_or(5), &req.issue_ids.unwrap_or_default(),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Capacity dashboard: today's ACU usage, review load, active sprint progress.")]
+    async fn cap_dashboard(
+        &self,
+        Parameters(req): Parameters<CapDashboardRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::capacity::cap_dashboard(
+            &req.space.unwrap_or_default(), &req.sprint_id.unwrap_or_default(),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Sprint burndown chart: ideal vs actual progress with projection.")]
+    async fn cap_burndown(
+        &self,
+        Parameters(req): Parameters<CapBurndownRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::capacity::cap_burndown(&req.sprint_id.unwrap_or_default());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Sprint velocity: historical throughput across sprints with accuracy tracking.")]
+    async fn cap_velocity(
+        &self,
+        Parameters(req): Parameters<CapVelocityRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::capacity::cap_velocity(
+            &req.space.unwrap_or_default(), req.count.unwrap_or(5),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "List all roles with definitions and today's utilization per role.")]
+    async fn cap_roles(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::capacity::cap_roles();
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
 }
 
 #[tool_handler]
