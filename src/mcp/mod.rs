@@ -276,6 +276,303 @@ impl AgentOSService {
         let result = tools::auto_config(&self.app, req).await;
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
+
+    // === MULTI-AGENT COORDINATION (31 tools) ===
+
+    #[tool(description = "Allocate a port for a service. Finds free port in 3001-3099 range, checks for conflicts.")]
+    async fn port_allocate(
+        &self,
+        Parameters(req): Parameters<PortAllocateRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::port_allocate(
+            &req.service, &req.pane_id, req.preferred, &req.description.unwrap_or_default(),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Release an allocated port back to the pool.")]
+    async fn port_release(
+        &self,
+        Parameters(req): Parameters<PortReleaseRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::port_release(req.port);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "List all allocated ports with active/inactive status.")]
+    async fn port_list(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::port_list();
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Get the port allocated for a service by name.")]
+    async fn port_get(
+        &self,
+        Parameters(req): Parameters<PortGetRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::port_get(&req.service);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Register an agent in a pane. Returns other agents on same project for coordination.")]
+    async fn agent_register(
+        &self,
+        Parameters(req): Parameters<AgentRegisterRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let files = req.files.unwrap_or_default();
+        let result = crate::multi_agent::agent_register(&req.pane_id, &req.project, &req.task, &files);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Update an agent's current task and file list.")]
+    async fn agent_update(
+        &self,
+        Parameters(req): Parameters<AgentUpdateRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::agent_update(&req.pane_id, &req.task, req.files.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "List all registered agents, optionally filtered by project.")]
+    async fn agent_list(
+        &self,
+        Parameters(req): Parameters<AgentListRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::agent_list(req.project.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Deregister an agent and release its locks.")]
+    async fn agent_deregister(
+        &self,
+        Parameters(req): Parameters<AgentDeregisterRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::agent_deregister(&req.pane_id);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Acquire file locks to prevent concurrent edits. Returns blocked status if files locked by others.")]
+    async fn lock_acquire(
+        &self,
+        Parameters(req): Parameters<LockAcquireRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::lock_acquire(
+            &req.pane_id, &req.files, &req.reason.unwrap_or_default(),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Release file locks. Empty files list releases all locks for this pane.")]
+    async fn lock_release(
+        &self,
+        Parameters(req): Parameters<LockReleaseRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let files = req.files.unwrap_or_default();
+        let result = crate::multi_agent::lock_release(&req.pane_id, &files);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Check if files are locked and by whom.")]
+    async fn lock_check(
+        &self,
+        Parameters(req): Parameters<LockCheckRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::lock_check(&req.files);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Claim a git branch for exclusive use. Prevents other agents from using the same branch.")]
+    async fn git_claim_branch(
+        &self,
+        Parameters(req): Parameters<GitClaimBranchRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::git_claim_branch(
+            &req.pane_id, &req.branch, &req.repo, &req.purpose.unwrap_or_default(),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Release a claimed git branch.")]
+    async fn git_release_branch(
+        &self,
+        Parameters(req): Parameters<GitReleaseBranchRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::git_release_branch(&req.pane_id, &req.branch, &req.repo);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "List all claimed git branches, optionally filtered by repo.")]
+    async fn git_list_branches(
+        &self,
+        Parameters(req): Parameters<GitListBranchesRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::git_list_branches(req.repo.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Check for conflicts before committing: file locks and concurrent edits.")]
+    async fn git_pre_commit_check(
+        &self,
+        Parameters(req): Parameters<GitPreCommitCheckRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::git_pre_commit_check(&req.pane_id, &req.repo, &req.files);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Claim exclusive build access for a project. Prevents concurrent builds.")]
+    async fn build_claim(
+        &self,
+        Parameters(req): Parameters<BuildClaimRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::build_claim(
+            &req.pane_id, &req.project, &req.build_type.unwrap_or_else(|| "default".into()),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Release build claim and record result in history.")]
+    async fn build_release(
+        &self,
+        Parameters(req): Parameters<BuildReleaseRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::build_release(
+            &req.pane_id, &req.project, req.success, &req.output.unwrap_or_default(),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Check if a project is currently being built.")]
+    async fn build_status(
+        &self,
+        Parameters(req): Parameters<BuildStatusRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::build_status(&req.project);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Get the last build result for a project.")]
+    async fn build_get_last(
+        &self,
+        Parameters(req): Parameters<BuildGetLastRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::build_get_last(&req.project);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Add an inter-agent task to the shared queue (not the AgentOS auto-cycle queue).")]
+    async fn ma_task_add(
+        &self,
+        Parameters(req): Parameters<MaTaskAddRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::task_add(
+            &req.project, &req.title, &req.description.unwrap_or_default(),
+            &req.priority.unwrap_or_else(|| "medium".into()), &req.added_by,
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Claim the next pending inter-agent task by priority.")]
+    async fn ma_task_claim(
+        &self,
+        Parameters(req): Parameters<MaTaskClaimRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::task_claim(&req.pane_id, req.project.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Mark an inter-agent task as completed.")]
+    async fn ma_task_complete(
+        &self,
+        Parameters(req): Parameters<MaTaskCompleteRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::task_complete(
+            &req.task_id, &req.pane_id, &req.result.unwrap_or_default(),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "List inter-agent tasks, optionally filtered by status and project.")]
+    async fn ma_task_list(
+        &self,
+        Parameters(req): Parameters<MaTaskListRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::task_list(req.status.as_deref(), req.project.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Add a knowledge base entry for cross-agent learning.")]
+    async fn kb_add(
+        &self,
+        Parameters(req): Parameters<KbAddRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let files = req.files.unwrap_or_default();
+        let result = crate::multi_agent::kb_add(
+            &req.pane_id, &req.project, &req.category, &req.title, &req.content, &files,
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Search the knowledge base by query, optionally filtered by project and category.")]
+    async fn kb_search(
+        &self,
+        Parameters(req): Parameters<KbSearchRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::kb_search(&req.query, req.project.as_deref(), req.category.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "List recent knowledge base entries.")]
+    async fn kb_list(
+        &self,
+        Parameters(req): Parameters<KbListRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::kb_list(req.project.as_deref(), req.limit.unwrap_or(20));
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Broadcast a message to all agents.")]
+    async fn msg_broadcast(
+        &self,
+        Parameters(req): Parameters<MsgBroadcastRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::msg_broadcast(
+            &req.from_pane, &req.message, &req.priority.unwrap_or_else(|| "info".into()),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Send a direct message to a specific agent.")]
+    async fn msg_send(
+        &self,
+        Parameters(req): Parameters<MsgSendRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::msg_send(&req.from_pane, &req.to_pane, &req.message);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Get unread messages for this agent. Marks as read by default.")]
+    async fn msg_get(
+        &self,
+        Parameters(req): Parameters<MsgGetRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::msg_get(&req.pane_id, req.mark_read.unwrap_or(true));
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Clean up stale entries: ports, agents, locks, branches, builds from inactive panes.")]
+    async fn cleanup_all(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::cleanup_all();
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Full status overview: ports, agents, locks, builds, pending tasks.")]
+    async fn status_overview(
+        &self,
+        Parameters(req): Parameters<StatusOverviewRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::status_overview(req.project.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
 }
 
 #[tool_handler]
