@@ -280,8 +280,11 @@ impl PanePreviewWidget {
             let title = if scroll > 0 {
                 format!(
                     " {} ({}) [{}-{}/{}] ",
-                    agent.target, agent.agent_type,
-                    start + 1, end, total_lines
+                    agent.target,
+                    agent.agent_type,
+                    start + 1,
+                    end,
+                    total_lines
                 )
             } else {
                 format!(" {} ({}) ", agent.target, agent.agent_type)

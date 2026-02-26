@@ -1,5 +1,5 @@
-use crate::agents::MonitoredAgent;
 use crate::agentos::AgentOSQueueTask;
+use crate::agents::MonitoredAgent;
 use crate::monitor::SystemStats;
 use std::collections::HashSet;
 use std::time::Instant;
@@ -349,9 +349,17 @@ impl AppState {
         self.show_summary_detail = !self.show_summary_detail;
     }
 
-    /// Scroll preview up by N lines
+    /// Scroll preview up by N lines (clamped to content length)
     pub fn preview_scroll_up(&mut self, lines: usize) {
-        self.preview_scroll = self.preview_scroll.saturating_add(lines);
+        let max_scroll = self.max_preview_scroll();
+        self.preview_scroll = self.preview_scroll.saturating_add(lines).min(max_scroll);
+    }
+
+    /// Maximum scroll offset based on selected agent's content
+    fn max_preview_scroll(&self) -> usize {
+        self.selected_agent()
+            .map(|a| a.last_content.lines().count().saturating_sub(1))
+            .unwrap_or(0)
     }
 
     /// Scroll preview down by N lines (toward bottom)

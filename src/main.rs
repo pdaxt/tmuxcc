@@ -6,6 +6,22 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use agentos_tui::app::Config;
 use agentos_tui::ui::run_app;
 
+/// Install a panic hook that restores the terminal before printing the panic.
+fn install_panic_hook() {
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        // Best-effort terminal restore
+        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::LeaveAlternateScreen,
+            crossterm::event::DisableMouseCapture
+        );
+        let _ = crossterm::execute!(std::io::stdout(), crossterm::cursor::Show);
+        original_hook(panic_info);
+    }));
+}
+
 #[derive(Parser)]
 #[command(name = "agentos-tui")]
 #[command(author, version, about, long_about = None)]
@@ -23,9 +39,9 @@ struct Cli {
     #[arg(short = 'f', long, value_name = "FILE")]
     config: Option<PathBuf>,
 
-    /// AgentOS API URL (default: http://localhost:3100)
-    #[arg(long, default_value = "http://localhost:3100", value_name = "URL")]
-    agentos_url: String,
+    /// AgentOS API URL (overrides config file)
+    #[arg(long, value_name = "URL")]
+    agentos_url: Option<String>,
 
     /// Write debug logs to agentos-tui.log
     #[arg(short, long)]
@@ -42,6 +58,7 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    install_panic_hook();
     let cli = Cli::parse();
 
     // Show config path and exit
@@ -93,7 +110,13 @@ async fn main() -> Result<()> {
     // CLI args override config file
     config.poll_interval_ms = cli.poll_interval;
     config.capture_lines = cli.capture_lines;
-    config.agentos_url = Some(cli.agentos_url);
+    if let Some(url) = cli.agentos_url {
+        config.agentos_url = Some(url);
+    }
+    // Default to localhost if no URL in config or CLI
+    if config.agentos_url.is_none() {
+        config.agentos_url = Some("http://localhost:3100".to_string());
+    }
 
     // Run the application
     run_app(config).await

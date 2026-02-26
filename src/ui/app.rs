@@ -44,11 +44,16 @@ pub async fn run_app(config: Config) -> Result<()> {
 
     // Check if tmux is available
     if !tmux_client.is_available() {
-        state.set_error("tmux is not running (agents from AgentOS API will still appear)".to_string());
+        state.set_error(
+            "tmux is not running (agents from AgentOS API will still appear)".to_string(),
+        );
     }
 
     // Create AgentOS client if URL configured
-    let agentos_client = config.agentos_url.as_ref().map(|url| AgentOSClient::new(Some(url.clone())));
+    let agentos_client = config
+        .agentos_url
+        .as_ref()
+        .map(|url| AgentOSClient::new(Some(url.clone())));
 
     // Create channel for monitor updates
     let (tx, mut rx) = mpsc::channel(32);
@@ -175,6 +180,9 @@ async fn run_loop(
                 state.agents = update.agents;
                 state.queue_tasks = update.queue_tasks;
                 state.agentos_connected = update.agentos_connected;
+                if let Some(msg) = update.flash {
+                    state.flash(msg);
+                }
                 // Ensure selected index is valid
                 if state.selected_index >= state.agents.root_agents.len() {
                     state.selected_index = state.agents.root_agents.len().saturating_sub(1);
@@ -435,8 +443,8 @@ async fn run_loop(
                                     if let Some(agent) = state.selected_agent() {
                                         let target = agent.target.clone();
                                         let agent_path = agent.abbreviated_path();
-                                        // Send the input text
-                                        if let Err(e) = tmux_client.send_keys(&target, &input) {
+                                        // Send literal text (handles special chars safely)
+                                        if let Err(e) = tmux_client.send_keys_literal(&target, &input) {
                                             state.set_error(format!("Failed to send input: {}", e));
                                         } else if let Err(e) = tmux_client.send_keys(&target, "Enter") {
                                             state.set_error(format!("Failed to send Enter: {}", e));
@@ -455,7 +463,7 @@ async fn run_loop(
                                     for idx in &indices {
                                         if let Some(agent) = state.agents.get_agent(*idx) {
                                             let target = agent.target.clone();
-                                            if tmux_client.send_keys(&target, &input).is_ok() {
+                                            if tmux_client.send_keys_literal(&target, &input).is_ok() {
                                                 let _ = tmux_client.send_keys(&target, "Enter");
                                                 sent += 1;
                                             }
@@ -588,7 +596,9 @@ fn map_key_to_action(code: KeyCode, modifiers: KeyModifiers, state: &AppState) -
 
         KeyCode::Char('Q') => Action::ToggleQueue,
         KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => Action::PreviewScrollUp,
-        KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => Action::PreviewScrollDown,
+        KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
+            Action::PreviewScrollDown
+        }
         KeyCode::Char('g') => Action::PreviewScrollBottom,
         KeyCode::PageUp => Action::PreviewScrollUp,
         KeyCode::PageDown => Action::PreviewScrollDown,

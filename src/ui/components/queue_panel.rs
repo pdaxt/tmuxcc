@@ -1,4 +1,6 @@
+use crate::agentos::AgentOSQueueTask;
 use crate::app::AppState;
+use chrono::{NaiveDateTime, Utc};
 use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
@@ -11,13 +13,36 @@ pub struct QueuePanelWidget;
 
 impl QueuePanelWidget {
     pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
-        let tasks = &state.queue_tasks;
+        // Filter out stale completed/failed tasks (older than 1 hour)
+        let tasks: Vec<&AgentOSQueueTask> = state
+            .queue_tasks
+            .iter()
+            .filter(|t| {
+                if t.status == "done" || t.status == "failed" {
+                    // Keep if completed_at is within the last hour
+                    t.completed_at
+                        .as_ref()
+                        .and_then(|ts| NaiveDateTime::parse_from_str(ts, "%Y-%m-%dT%H:%M:%S").ok())
+                        .map(|dt| Utc::now().naive_utc().signed_duration_since(dt).num_hours() < 1)
+                        .unwrap_or(false)
+                } else {
+                    true // Always show running/pending/blocked
+                }
+            })
+            .collect();
+
         let pending = tasks.iter().filter(|t| t.status == "pending").count();
         let running = tasks.iter().filter(|t| t.status == "running").count();
-        let blocked = tasks.iter().filter(|t| !t.depends_on.is_empty() && t.status == "pending").count();
+        let blocked = tasks
+            .iter()
+            .filter(|t| !t.depends_on.is_empty() && t.status == "pending")
+            .count();
 
         let title = if state.agentos_connected {
-            format!(" Queue ({} run, {} pend, {} blk) ", running, pending, blocked)
+            format!(
+                " Queue ({} run, {} pend, {} blk) ",
+                running, pending, blocked
+            )
         } else {
             " Queue (disconnected) ".to_string()
         };
@@ -46,7 +71,7 @@ impl QueuePanelWidget {
         let max_lines = (area.height as usize).saturating_sub(2); // borders
         let mut lines: Vec<Line> = Vec::new();
 
-        for (i, task) in tasks.iter().enumerate() {
+        for (i, &task) in tasks.iter().enumerate() {
             if i >= max_lines {
                 break;
             }
@@ -68,13 +93,22 @@ impl QueuePanelWidget {
             };
 
             // Truncate project and task to fit
-            let project = truncate(&task.project.replace("/tmp/", "").replace("/Users/pran/Projects/", ""), 15);
+            let project = truncate(
+                &task
+                    .project
+                    .replace("/tmp/", "")
+                    .replace("/Users/pran/Projects/", ""),
+                15,
+            );
             let task_name = truncate(&task.task, 30);
 
             let spans = vec![
                 Span::styled(
                     format!(" {} ", status_str),
-                    Style::default().fg(Color::Black).bg(status_color).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(status_color)
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(" "),
                 Span::styled(
@@ -82,15 +116,9 @@ impl QueuePanelWidget {
                     Style::default().fg(priority_color),
                 ),
                 Span::raw(" "),
-                Span::styled(
-                    format!("{:<15}", project),
-                    Style::default().fg(Color::Cyan),
-                ),
+                Span::styled(format!("{:<15}", project), Style::default().fg(Color::Cyan)),
                 Span::raw(" "),
-                Span::styled(
-                    task_name,
-                    Style::default().fg(Color::White),
-                ),
+                Span::styled(task_name, Style::default().fg(Color::White)),
             ];
 
             // Add pane assignment if running
@@ -110,6 +138,23 @@ impl QueuePanelWidget {
                     format!("wait:{}", task.depends_on.len()),
                     Style::default().fg(Color::Magenta),
                 ));
+            }
+
+            // Add elapsed time for running tasks
+            if task.status == "running" {
+                if let Some(ref started) = task.started_at {
+                    if let Ok(dt) = NaiveDateTime::parse_from_str(started, "%Y-%m-%dT%H:%M:%S") {
+                        let elapsed = Utc::now().naive_utc().signed_duration_since(dt);
+                        let mins = elapsed.num_minutes();
+                        let display = if mins >= 60 {
+                            format!("{}h{}m", mins / 60, mins % 60)
+                        } else {
+                            format!("{}m", mins)
+                        };
+                        all_spans.push(Span::raw(" "));
+                        all_spans.push(Span::styled(display, Style::default().fg(Color::DarkGray)));
+                    }
+                }
             }
 
             lines.push(Line::from(all_spans));

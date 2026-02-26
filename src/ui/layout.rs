@@ -16,7 +16,7 @@ impl Layout {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(3),            // Header
-                Constraint::Min(10),             // Content area (agents + preview)
+                Constraint::Min(10),              // Content area (agents + preview)
                 Constraint::Length(queue_height), // Queue panel (0 when hidden)
                 Constraint::Length(1),            // Footer (1 line, no border)
             ])

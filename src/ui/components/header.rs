@@ -15,8 +15,16 @@ impl HeaderWidget {
         let total = state.agents.root_agents.len();
         let processing = state.agents.processing_count();
         let pending = state.agents.active_count();
-        let queue_pending = state.queue_tasks.iter().filter(|t| t.status == "pending").count();
-        let queue_running = state.queue_tasks.iter().filter(|t| t.status == "running").count();
+        let queue_pending = state
+            .queue_tasks
+            .iter()
+            .filter(|t| t.status == "pending")
+            .count();
+        let queue_running = state
+            .queue_tasks
+            .iter()
+            .filter(|t| t.status == "running")
+            .count();
         let time = Local::now().format("%H:%M").to_string();
 
         let mut spans = vec![

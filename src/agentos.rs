@@ -115,7 +115,9 @@ impl AgentOSClient {
             0,
             window_name,
             pane.pane as u32,
-            pane.workspace.clone().unwrap_or_else(|| pane.project.clone()),
+            pane.workspace
+                .clone()
+                .unwrap_or_else(|| pane.project.clone()),
             AgentType::ClaudeCode,
             0, // PID unknown from API
         );

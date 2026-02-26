@@ -84,7 +84,7 @@ impl TmuxClient {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
-    /// Sends keys to a specific pane
+    /// Sends keys to a specific pane (interprets special keys like Enter, Escape)
     pub fn send_keys(&self, target: &str, keys: &str) -> Result<()> {
         let output = Command::new("tmux")
             .args(["send-keys", "-t", target, keys])
@@ -94,6 +94,21 @@ impl TmuxClient {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             anyhow::bail!("tmux send-keys failed for {}: {}", target, stderr);
+        }
+
+        Ok(())
+    }
+
+    /// Sends literal text to a pane (no special key interpretation, handles all chars safely)
+    pub fn send_keys_literal(&self, target: &str, text: &str) -> Result<()> {
+        let output = Command::new("tmux")
+            .args(["send-keys", "-l", "-t", target, text])
+            .output()
+            .context("Failed to execute tmux send-keys -l")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("tmux send-keys -l failed for {}: {}", target, stderr);
         }
 
         Ok(())

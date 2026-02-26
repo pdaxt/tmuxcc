@@ -5,8 +5,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{debug, error, warn};
 
-use crate::agents::{AgentStatus, MonitoredAgent};
 use crate::agentos::{AgentOSClient, AgentOSQueueTask};
+use crate::agents::{AgentStatus, MonitoredAgent};
 use crate::app::AgentTree;
 use crate::parsers::ParserRegistry;
 use crate::tmux::{refresh_process_cache, TmuxClient};
@@ -20,6 +20,8 @@ pub struct MonitorUpdate {
     pub agents: AgentTree,
     pub queue_tasks: Vec<AgentOSQueueTask>,
     pub agentos_connected: bool,
+    /// Flash message for connection state changes
+    pub flash: Option<String>,
 }
 
 /// Background task that monitors tmux panes and AgentOS for AI agents
@@ -32,6 +34,10 @@ pub struct MonitorTask {
     /// Track when each agent was last seen as "active" (Processing/AwaitingApproval)
     /// Key: agent target string
     last_active: HashMap<String, Instant>,
+    /// Consecutive API failures for exponential backoff
+    api_fail_count: u32,
+    /// Whether API was connected last poll (for detecting transitions)
+    was_connected: bool,
 }
 
 impl MonitorTask {
@@ -49,6 +55,8 @@ impl MonitorTask {
             tx,
             poll_interval,
             last_active: HashMap::new(),
+            api_fail_count: 0,
+            was_connected: false,
         }
     }
 
@@ -63,10 +71,22 @@ impl MonitorTask {
                 }
             };
 
+            // Detect connection state transitions
+            let flash = if connected && !self.was_connected {
+                self.api_fail_count = 0;
+                Some("AgentOS connected".to_string())
+            } else if !connected && self.was_connected {
+                Some("AgentOS disconnected".to_string())
+            } else {
+                None
+            };
+            self.was_connected = connected;
+
             let update = MonitorUpdate {
                 agents: tree,
                 queue_tasks,
                 agentos_connected: connected,
+                flash,
             };
             if self.tx.send(update).await.is_err() {
                 debug!("Monitor channel closed, stopping");
@@ -86,17 +106,36 @@ impl MonitorTask {
         let mut connected = false;
 
         if let Some(ref client) = self.agentos_client {
+            // Exponential backoff: skip API calls if failing repeatedly
+            // After N failures, only try every 2^N polls (max 32 = ~16s at 500ms)
+            let backoff_polls = (1u32 << self.api_fail_count.min(5)) as u64;
+            let should_try_api = self.api_fail_count == 0
+                || (std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64
+                    / self.poll_interval.as_millis() as u64)
+                    .is_multiple_of(backoff_polls);
+
+            if !should_try_api {
+                return Ok((tree, queue_tasks, false));
+            }
+
             // Fetch panes from AgentOS
             match client.fetch_panes().await {
                 Ok(panes) => {
                     connected = true;
                     for pane in &panes {
-                        if pane.pty_running || pane.status == "active" {
+                        // Show panes that have a real project or are actively running
+                        let has_project = pane.project != "--" && !pane.project.is_empty();
+                        let is_active = pane.pty_running || pane.status == "active";
+                        if has_project || is_active {
                             let agent = AgentOSClient::pane_to_agent(pane);
                             // Only add if not already detected via tmux
-                            let already_exists = tree.root_agents.iter().any(|a| {
-                                a.path == agent.path && a.agent_type == agent.agent_type
-                            });
+                            let already_exists = tree
+                                .root_agents
+                                .iter()
+                                .any(|a| a.path == agent.path && a.agent_type == agent.agent_type);
                             if !already_exists {
                                 tree.root_agents.push(agent);
                             }
@@ -104,7 +143,11 @@ impl MonitorTask {
                     }
                 }
                 Err(e) => {
-                    debug!("AgentOS API unavailable: {}", e);
+                    self.api_fail_count = self.api_fail_count.saturating_add(1);
+                    debug!(
+                        "AgentOS API unavailable (fail #{}): {}",
+                        self.api_fail_count, e
+                    );
                 }
             }
 
