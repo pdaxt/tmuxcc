@@ -2114,31 +2114,15 @@ fn truncate(s: &str, max: usize) -> String {
 }
 
 fn update_agents_json(pane_num: u8, project: &str, task: &str) {
-    let agents_file = config::multi_agent_root().join("agents.json");
-    let mut agents = crate::state::persistence::read_json(&agents_file);
     let window = (pane_num as u32 - 1) / 3 + 1;
     let pane = (pane_num as u32 - 1) % 3 + 1;
     let pane_id = format!("{}:{}.{}", config::session_name(), window, pane);
-    if let Some(obj) = agents.as_object_mut() {
-        obj.insert(pane_id, serde_json::json!({
-            "project": project,
-            "task": task,
-            "files": [],
-            "registered_at": state::now(),
-            "last_update": state::now(),
-        }));
-    }
-    let _ = crate::state::persistence::write_json(&agents_file, &agents);
+    let _ = crate::multi_agent::agent_register(&pane_id, project, task, &[]);
 }
 
 fn remove_from_agents_json(pane_num: u8) {
-    let agents_file = config::multi_agent_root().join("agents.json");
-    let mut agents = crate::state::persistence::read_json(&agents_file);
     let window = (pane_num as u32 - 1) / 3 + 1;
     let pane = (pane_num as u32 - 1) % 3 + 1;
     let pane_id = format!("{}:{}.{}", config::session_name(), window, pane);
-    if let Some(obj) = agents.as_object_mut() {
-        obj.remove(&pane_id);
-    }
-    let _ = crate::state::persistence::write_json(&agents_file, &agents);
+    let _ = crate::multi_agent::agent_deregister(&pane_id);
 }

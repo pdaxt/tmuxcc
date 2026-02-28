@@ -567,19 +567,16 @@ pub fn agent_list(project: Option<&str>) -> Value {
         Err(e) => return json!({"error": format!("Query: {}", e)}),
     };
 
-    let rows = if let Some(p) = project {
-        stmt.query_map(params![p], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?, r.get::<_, String>(4)?))
-        })
+    let extract = |r: &rusqlite::Row| -> rusqlite::Result<(String, String, String, String, String)> {
+        Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+    };
+    let rows_result = if let Some(p) = project {
+        stmt.query_map(params![p], extract)
     } else {
-        stmt.query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?, r.get::<_, String>(4)?))
-        })
+        stmt.query_map([], extract)
     };
 
-    if let Ok(rows) = rows {
+    if let Ok(rows) = rows_result {
         for row in rows.flatten() {
             let files_val: Value = serde_json::from_str(&row.3).unwrap_or(json!([]));
             result.push(json!({
@@ -1155,29 +1152,22 @@ pub fn kb_list(project: Option<&str>, limit: usize) -> Value {
         Err(e) => return json!({"error": format!("Query: {}", e)}),
     };
 
-    let rows = if let Some(ref p) = project_param {
-        stmt.query_map(params![p, limit as i64], |r| {
-            Ok(json!({
-                "id": r.get::<_, String>(0)?, "pane_id": r.get::<_, String>(1)?,
-                "project": r.get::<_, String>(2)?, "category": r.get::<_, String>(3)?,
-                "title": r.get::<_, String>(4)?, "content": r.get::<_, String>(5)?,
-                "files": serde_json::from_str::<Value>(&r.get::<_, String>(6)?).unwrap_or(json!([])),
-                "added_at": r.get::<_, String>(7)?
-            }))
-        })
+    let extract_kb = |r: &rusqlite::Row| -> rusqlite::Result<Value> {
+        Ok(json!({
+            "id": r.get::<_, String>(0)?, "pane_id": r.get::<_, String>(1)?,
+            "project": r.get::<_, String>(2)?, "category": r.get::<_, String>(3)?,
+            "title": r.get::<_, String>(4)?, "content": r.get::<_, String>(5)?,
+            "files": serde_json::from_str::<Value>(&r.get::<_, String>(6)?).unwrap_or(json!([])),
+            "added_at": r.get::<_, String>(7)?
+        }))
+    };
+    let rows_result = if let Some(ref p) = project_param {
+        stmt.query_map(params![p, limit as i64], extract_kb)
     } else {
-        stmt.query_map(params![limit as i64], |r| {
-            Ok(json!({
-                "id": r.get::<_, String>(0)?, "pane_id": r.get::<_, String>(1)?,
-                "project": r.get::<_, String>(2)?, "category": r.get::<_, String>(3)?,
-                "title": r.get::<_, String>(4)?, "content": r.get::<_, String>(5)?,
-                "files": serde_json::from_str::<Value>(&r.get::<_, String>(6)?).unwrap_or(json!([])),
-                "added_at": r.get::<_, String>(7)?
-            }))
-        })
+        stmt.query_map(params![limit as i64], extract_kb)
     };
 
-    if let Ok(rows) = rows {
+    if let Ok(rows) = rows_result {
         for row in rows.flatten() { entries.push(row); }
     }
     json!({"entries": entries})
@@ -1284,13 +1274,12 @@ pub fn cleanup_all() -> Value {
     let mut stale_ports = vec![];
     {
         let mut stmt = tx.prepare("SELECT port, pane_id FROM ports").unwrap();
-        if let Ok(rows) = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))) {
-            for row in rows.flatten() {
-                let (port, pane_id) = row;
-                let (in_use, _) = is_port_in_use(port as u16);
-                if !in_use && !active.contains(&pane_id) {
-                    stale_ports.push(port);
-                }
+        let collected: Vec<_> = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+            .into_iter().flat_map(|rows| rows.flatten().collect::<Vec<_>>()).collect();
+        for (port, pane_id) in collected {
+            let (in_use, _) = is_port_in_use(port as u16);
+            if !in_use && !active.contains(&pane_id) {
+                stale_ports.push(port);
             }
         }
     }
@@ -1303,10 +1292,10 @@ pub fn cleanup_all() -> Value {
     let mut stale_agents = vec![];
     {
         let mut stmt = tx.prepare("SELECT pane_id FROM agents").unwrap();
-        if let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) {
-            for row in rows.flatten() {
-                if !active.contains(&row) { stale_agents.push(row); }
-            }
+        let collected: Vec<_> = stmt.query_map([], |r| r.get::<_, String>(0))
+            .into_iter().flat_map(|rows| rows.flatten().collect::<Vec<_>>()).collect();
+        for row in collected {
+            if !active.contains(&row) { stale_agents.push(row); }
         }
     }
     // Count orphan locks before deleting agents (CASCADE handles them)
@@ -1340,10 +1329,10 @@ pub fn cleanup_all() -> Value {
     let mut stale_branches = vec![];
     {
         let mut stmt = tx.prepare("SELECT repo_branch, pane_id FROM git_branches").unwrap();
-        if let Ok(rows) = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))) {
-            for row in rows.flatten() {
-                if !active.contains(&row.1) { stale_branches.push(row.0); }
-            }
+        let collected: Vec<_> = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .into_iter().flat_map(|rows| rows.flatten().collect::<Vec<_>>()).collect();
+        for row in collected {
+            if !active.contains(&row.1) { stale_branches.push(row.0); }
         }
     }
     for key in &stale_branches {
@@ -1355,10 +1344,10 @@ pub fn cleanup_all() -> Value {
     let mut stale_builds = vec![];
     {
         let mut stmt = tx.prepare("SELECT project, pane_id FROM builds_active").unwrap();
-        if let Ok(rows) = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))) {
-            for row in rows.flatten() {
-                if !active.contains(&row.1) { stale_builds.push(row.0); }
-            }
+        let collected: Vec<_> = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .into_iter().flat_map(|rows| rows.flatten().collect::<Vec<_>>()).collect();
+        for row in collected {
+            if !active.contains(&row.1) { stale_builds.push(row.0); }
         }
     }
     for project in &stale_builds {
@@ -1381,11 +1370,11 @@ pub fn status_overview(project: Option<&str>) -> Value {
     let mut port_list = vec![];
     {
         let mut stmt = conn.prepare("SELECT port, service FROM ports").unwrap();
-        if let Ok(rows) = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))) {
-            for row in rows.flatten() {
-                let (active, _) = is_port_in_use(row.0 as u16);
-                port_list.push(json!({"port": row.0, "service": row.1, "active": active}));
-            }
+        let collected: Vec<_> = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+            .into_iter().flat_map(|rows| rows.flatten().collect::<Vec<_>>()).collect();
+        for row in collected {
+            let (active, _) = is_port_in_use(row.0 as u16);
+            port_list.push(json!({"port": row.0, "service": row.1, "active": active}));
         }
     }
 
@@ -1398,12 +1387,15 @@ pub fn status_overview(project: Option<&str>) -> Value {
             "SELECT pane_id, project, task FROM agents"
         };
         let mut stmt = conn.prepare(query).unwrap();
-        let rows = if let Some(p) = project {
-            stmt.query_map(params![p], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))
-        } else {
-            stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)))
+        let extract_agent = |r: &rusqlite::Row| -> rusqlite::Result<(String, String, String)> {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
         };
-        if let Ok(rows) = rows {
+        let rows_result = if let Some(p) = project {
+            stmt.query_map(params![p], extract_agent)
+        } else {
+            stmt.query_map([], extract_agent)
+        };
+        if let Ok(rows) = rows_result {
             for row in rows.flatten() {
                 let short_task: String = row.2.chars().take(50).collect();
                 agent_list.push(json!({
@@ -1420,9 +1412,9 @@ pub fn status_overview(project: Option<&str>) -> Value {
     let mut active_builds = vec![];
     {
         let mut stmt = conn.prepare("SELECT project FROM builds_active").unwrap();
-        if let Ok(rows) = stmt.query_map([], |r| r.get::<_, String>(0)) {
-            for row in rows.flatten() { active_builds.push(row); }
-        }
+        let collected: Vec<_> = stmt.query_map([], |r| r.get::<_, String>(0))
+            .into_iter().flat_map(|rows| rows.flatten().collect::<Vec<_>>()).collect();
+        for row in collected { active_builds.push(row); }
     }
 
     let pending_tasks: i64 = conn.query_row(
