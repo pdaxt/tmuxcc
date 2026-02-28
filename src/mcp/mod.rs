@@ -826,6 +826,190 @@ impl AgentOSService {
         let result = crate::capacity::cap_roles();
         Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
     }
+
+    // === COLLAB TOOLS (19 tools) ===
+
+    #[tool(description = "List all collaboration spaces with document counts.")]
+    async fn space_list(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::collab::space_list();
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Create a new collaboration space for organizing docs by project.")]
+    async fn space_create(
+        &self,
+        Parameters(req): Parameters<SpaceCreateRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::collab::space_create(&req.name);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "List documents. Filter by space and/or status (draft, review, approved, locked).")]
+    async fn doc_list(
+        &self,
+        Parameters(req): Parameters<DocListRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::collab::doc_list(&req.space.unwrap_or_default(), &req.status.unwrap_or_default());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Read a document and its metadata, comments, directives, and proposals.")]
+    async fn doc_read(
+        &self,
+        Parameters(req): Parameters<DocReadRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::collab::doc_read(&req.space, &req.name, req.include_meta.unwrap_or(true));
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Create a new markdown document in a space.")]
+    async fn doc_create(
+        &self,
+        Parameters(req): Parameters<DocCreateRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::collab::doc_create(
+            &req.space, &req.name, &req.content.unwrap_or_default(),
+            &req.status.unwrap_or_default(), &req.tags.unwrap_or_default(),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Edit a document. Fails if locked by another agent — use doc_propose instead.")]
+    async fn doc_edit(
+        &self,
+        Parameters(req): Parameters<DocEditRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::collab::doc_edit(
+            &req.space, &req.name, &req.content, &req.agent_id.unwrap_or_default(),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Propose changes to a document for human review. Use when doc is locked or review is wanted.")]
+    async fn doc_propose(
+        &self,
+        Parameters(req): Parameters<DocProposeRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::collab::doc_propose(
+            &req.space, &req.name, &req.content,
+            &req.summary.unwrap_or_default(), &req.agent_id.unwrap_or_default(),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Approve a proposal and merge it into the document.")]
+    async fn doc_approve(
+        &self,
+        Parameters(req): Parameters<DocApproveRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::collab::doc_approve(
+            &req.space, &req.name, &req.proposal_id.unwrap_or_else(|| "latest".into()),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Reject a proposal with a reason.")]
+    async fn doc_reject(
+        &self,
+        Parameters(req): Parameters<DocRejectRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::collab::doc_reject(
+            &req.space, &req.name, &req.proposal_id, &req.reason.unwrap_or_default(),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Lock a document. Prevents direct editing — agents must use doc_propose. Auto-expires after 30 min.")]
+    async fn doc_lock(
+        &self,
+        Parameters(req): Parameters<DocLockRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::collab::doc_lock(
+            &req.space, &req.name, &req.locked_by.unwrap_or_default(),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Unlock a document. Allows direct editing again.")]
+    async fn doc_unlock(
+        &self,
+        Parameters(req): Parameters<DocUnlockRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::collab::doc_unlock(&req.space, &req.name);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Add a comment to a document. For feedback, questions, or directive responses.")]
+    async fn doc_comment(
+        &self,
+        Parameters(req): Parameters<DocCommentRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::collab::doc_comment(
+            &req.space, &req.name, &req.text,
+            &req.author.unwrap_or_default(), req.line.unwrap_or(0),
+        );
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Read all comments on a document.")]
+    async fn doc_comments(
+        &self,
+        Parameters(req): Parameters<DocCommentsRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::collab::doc_comments(&req.space, &req.name);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Update document status: draft, review, approved, archived.")]
+    async fn doc_status(
+        &self,
+        Parameters(req): Parameters<DocStatusRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::collab::doc_status(&req.space, &req.name, &req.status);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Search across all documents for text matches (case-insensitive).")]
+    async fn doc_search(
+        &self,
+        Parameters(req): Parameters<DocSearchRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::collab::doc_search(&req.query, &req.space.unwrap_or_default());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Find all <!-- @claude: ... --> directives — tasks/questions from humans for Claude.")]
+    async fn doc_directives(
+        &self,
+        Parameters(req): Parameters<DocDirectivesRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::collab::doc_directives(&req.space.unwrap_or_default());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Show git version history of a document.")]
+    async fn doc_history(
+        &self,
+        Parameters(req): Parameters<DocHistoryRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::collab::doc_history(&req.space, &req.name, req.limit.unwrap_or(10));
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Delete a document and its metadata/proposals. Requires confirm=true.")]
+    async fn doc_delete(
+        &self,
+        Parameters(req): Parameters<DocDeleteRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::collab::doc_delete(&req.space, &req.name, req.confirm.unwrap_or(false));
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Initialize the collab workspace. Creates directories and sets up git.")]
+    async fn collab_init(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::collab::collab_init();
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
 }
 
 #[tool_handler]

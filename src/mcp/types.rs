@@ -754,3 +754,175 @@ pub struct CapVelocityRequest {
     #[schemars(description = "Number of sprints to analyze")]
     pub count: Option<usize>,
 }
+
+// === COLLAB TOOLS ===
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SpaceCreateRequest {
+    #[schemars(description = "Space name (lowercase, hyphens ok)")]
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DocListRequest {
+    #[schemars(description = "Filter by space (empty = all)")]
+    pub space: Option<String>,
+    #[schemars(description = "Filter by status: draft, review, approved, locked")]
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DocReadRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Document name (without .md)")]
+    pub name: String,
+    #[schemars(description = "Include metadata, comments, directives (default true)")]
+    pub include_meta: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DocCreateRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Document name (no .md extension)")]
+    pub name: String,
+    #[schemars(description = "Initial markdown content")]
+    pub content: Option<String>,
+    #[schemars(description = "Initial status: draft, review, approved")]
+    pub status: Option<String>,
+    #[schemars(description = "Tags for categorization")]
+    pub tags: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DocEditRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Document name")]
+    pub name: String,
+    #[schemars(description = "New full markdown content")]
+    pub content: String,
+    #[schemars(description = "Your agent/pane ID for lock checking")]
+    pub agent_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DocProposeRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Document name")]
+    pub name: String,
+    #[schemars(description = "Full proposed markdown content")]
+    pub content: String,
+    #[schemars(description = "Brief description of changes")]
+    pub summary: Option<String>,
+    #[schemars(description = "Your agent/pane ID")]
+    pub agent_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DocApproveRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Document name")]
+    pub name: String,
+    #[schemars(description = "Proposal ID or 'latest'")]
+    pub proposal_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DocRejectRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Document name")]
+    pub name: String,
+    #[schemars(description = "Proposal ID to reject")]
+    pub proposal_id: String,
+    #[schemars(description = "Rejection reason")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DocLockRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Document name")]
+    pub name: String,
+    #[schemars(description = "Who is locking (default: 'human')")]
+    pub locked_by: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DocUnlockRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Document name")]
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DocCommentRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Document name")]
+    pub name: String,
+    #[schemars(description = "Comment text")]
+    pub text: String,
+    #[schemars(description = "Author (default: 'claude')")]
+    pub author: Option<String>,
+    #[schemars(description = "Line number reference (0 = general)")]
+    pub line: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DocCommentsRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Document name")]
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DocStatusRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Document name")]
+    pub name: String,
+    #[schemars(description = "New status: draft, review, approved, archived")]
+    pub status: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DocSearchRequest {
+    #[schemars(description = "Search text (case-insensitive)")]
+    pub query: String,
+    #[schemars(description = "Limit to specific space (empty = all)")]
+    pub space: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DocDirectivesRequest {
+    #[schemars(description = "Limit to specific space (empty = all)")]
+    pub space: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DocHistoryRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Document name")]
+    pub name: String,
+    #[schemars(description = "Max history entries (default 10)")]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DocDeleteRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Document name")]
+    pub name: String,
+    #[schemars(description = "Must be true to delete")]
+    pub confirm: Option<bool>,
+}
