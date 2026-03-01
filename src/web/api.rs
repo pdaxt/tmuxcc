@@ -680,6 +680,42 @@ pub async fn get_watch(
     Json(serde_json::from_str(&result).unwrap_or(json!({"error": "parse failed"})))
 }
 
+// === Analytics endpoints (serve FORGE-ported data to TUI) ===
+
+/// GET /api/analytics/digest — 24h daily digest
+pub async fn get_analytics_digest() -> Json<Value> {
+    Json(crate::dashboard::dash_daily_digest(None))
+}
+
+/// GET /api/analytics/alerts — Active alerts (dead agents, high error rates, etc.)
+pub async fn get_analytics_alerts() -> Json<Value> {
+    Json(crate::dashboard::dash_alerts(None))
+}
+
+/// GET /api/analytics/quality?project=X — Project health score
+#[derive(Deserialize, Default)]
+pub struct QualityQuery {
+    pub project: Option<String>,
+}
+
+pub async fn get_analytics_quality(Query(params): Query<QualityQuery>) -> Json<Value> {
+    let project = params.project.unwrap_or_default();
+    if project.is_empty() {
+        return Json(json!({"error": "missing project parameter"}));
+    }
+    Json(crate::quality::project_health(&project))
+}
+
+/// GET /api/analytics/leaderboard — Agent rankings (last 7 days)
+pub async fn get_analytics_leaderboard() -> Json<Value> {
+    Json(crate::dashboard::dash_leaderboard(7, None))
+}
+
+/// GET /api/analytics/overview — God view dashboard
+pub async fn get_analytics_overview() -> Json<Value> {
+    Json(crate::dashboard::dash_overview(None))
+}
+
 // === Helpers ===
 
 fn load_all_issues(space: &str) -> Vec<Value> {

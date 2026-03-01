@@ -40,6 +40,12 @@ pub fn build_router(app: Arc<App>) -> Router {
         // Enhanced monitoring endpoints
         .route("/api/monitor", get(api::get_monitor))
         .route("/api/pane/{id}/watch", get(api::get_watch))
+        // Analytics endpoints (FORGE data for TUI)
+        .route("/api/analytics/digest", get(api::get_analytics_digest))
+        .route("/api/analytics/alerts", get(api::get_analytics_alerts))
+        .route("/api/analytics/quality", get(api::get_analytics_quality))
+        .route("/api/analytics/leaderboard", get(api::get_analytics_leaderboard))
+        .route("/api/analytics/overview", get(api::get_analytics_overview))
         // SSE events
         .route("/api/events", get(sse::event_stream))
         .layer(CorsLayer::permissive())
