@@ -129,8 +129,16 @@ pub async fn spawn(app: &App, req: SpawnRequest) -> String {
         &format!("Spawned {} on {}: {}", role, project_name, truncate(&task, 40)),
     ).await;
 
-    // Update multi_agent agents.json
+    // Register agent in coordination DB
     update_agents_json(pane_num, &project_name, &task);
+
+    // Auto-claim git branch in coordination DB so other agents see it
+    if let Some(ref branch) = ws_branch {
+        let window = (pane_num as u32 - 1) / 3 + 1;
+        let pane = (pane_num as u32 - 1) % 3 + 1;
+        let pane_id = format!("{}:{}.{}", config::session_name(), window, pane);
+        let _ = crate::multi_agent::git_claim_branch(&pane_id, branch, &project_name, &task);
+    }
 
     serde_json::json!({
         "status": "spawned",
@@ -177,6 +185,8 @@ pub async fn kill(app: &App, req: KillRequest) -> String {
 
     // Git-first: save WIP and cleanup worktree
     let mut git_info = serde_json::Value::Null;
+    let branch_name = pane_data.branch_name.clone();
+    let project_name = pane_data.project.clone();
     if let Some(ws) = &ws_path {
         let commit_result = workspace::commit_all(ws, &format!("WIP: killed ({})", reason));
         let wt_result = workspace::remove_worktree(&project_path, ws);
@@ -184,6 +194,14 @@ pub async fn kill(app: &App, req: KillRequest) -> String {
             "wip_commit": commit_result.unwrap_or_else(|e| e.to_string()),
             "worktree_removed": wt_result.is_ok(),
         });
+    }
+
+    // Release git branch claim in coordination DB
+    if let Some(ref branch) = branch_name {
+        let window = (pane_num as u32 - 1) / 3 + 1;
+        let pane = (pane_num as u32 - 1) % 3 + 1;
+        let pane_id = format!("{}:{}.{}", config::session_name(), window, pane);
+        let _ = crate::multi_agent::git_release_branch(&pane_id, branch, &project_name);
     }
 
     // Deregister machine identity
@@ -202,7 +220,7 @@ pub async fn kill(app: &App, req: KillRequest) -> String {
     app.state.set_pane(pane_num, pane_state).await;
     app.state.log_activity(pane_num, "kill", &format!("Killed: {}", reason)).await;
 
-    // Remove from multi_agent
+    // Remove from multi_agent (CASCADE deletes file locks too)
     remove_from_agents_json(pane_num);
 
     serde_json::json!({
