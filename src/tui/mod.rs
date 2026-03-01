@@ -215,29 +215,22 @@ fn run_loop(
         let timeout = tick_rate.saturating_sub(last_tick.elapsed());
         if event::poll(timeout)? {
             if let Event::Key(key) = event::read()? {
-                match &mut mode {
-                    TuiMode::Navigate => {
-                        if let Some(quit) = handle_navigate(key, &mut mode, &mut view_mode, &mut selected, app, cmd_tx) {
-                            if quit { return Ok(()); }
-                        }
+                if matches!(mode, TuiMode::Navigate) {
+                    if let Some(true) = handle_navigate(key, &mut mode, &mut view_mode, &mut selected, app, cmd_tx) {
+                        return Ok(());
                     }
-                    TuiMode::Command { input: input_str, cursor } => {
-                        handle_command(key, input_str, cursor, &mut mode, cmd_tx);
-                    }
-                    TuiMode::Input { form } => {
-                        handle_input(key, form, &mut mode, cmd_tx);
-                    }
-                    TuiMode::Confirm { action, .. } => {
-                        handle_confirm(key, action.clone(), &mut mode, cmd_tx);
-                    }
-                    TuiMode::Executing { .. } => {
-                        if key.code == KeyCode::Esc {
-                            mode = TuiMode::Navigate;
-                        }
-                    }
-                    TuiMode::Result { .. } => {
+                } else if matches!(mode, TuiMode::Command { .. }) {
+                    handle_command(key, &mut mode, cmd_tx);
+                } else if matches!(mode, TuiMode::Input { .. }) {
+                    handle_input(key, &mut mode, cmd_tx);
+                } else if matches!(mode, TuiMode::Confirm { .. }) {
+                    handle_confirm(key, &mut mode, cmd_tx);
+                } else if matches!(mode, TuiMode::Executing { .. }) {
+                    if key.code == KeyCode::Esc {
                         mode = TuiMode::Navigate;
                     }
+                } else if matches!(mode, TuiMode::Result { .. }) {
+                    mode = TuiMode::Navigate;
                 }
             }
         }
@@ -358,11 +351,14 @@ fn handle_navigate(
 
 fn handle_command(
     key: crossterm::event::KeyEvent,
-    input_str: &mut String,
-    cursor: &mut usize,
     mode: &mut TuiMode,
     cmd_tx: &mpsc::Sender<TuiCommand>,
 ) {
+    let (input_str, cursor) = match mode {
+        TuiMode::Command { input, cursor } => (input, cursor),
+        _ => return,
+    };
+
     match key.code {
         KeyCode::Esc => {
             *mode = TuiMode::Navigate;
@@ -407,10 +403,14 @@ fn handle_command(
 
 fn handle_input(
     key: crossterm::event::KeyEvent,
-    form: &mut input::FormState,
     mode: &mut TuiMode,
     cmd_tx: &mpsc::Sender<TuiCommand>,
 ) {
+    let form = match mode {
+        TuiMode::Input { form } => form,
+        _ => return,
+    };
+
     match key.code {
         KeyCode::Esc => {
             *mode = TuiMode::Navigate;
@@ -471,10 +471,14 @@ fn handle_input(
 
 fn handle_confirm(
     key: crossterm::event::KeyEvent,
-    action: PendingAction,
     mode: &mut TuiMode,
     cmd_tx: &mpsc::Sender<TuiCommand>,
 ) {
+    let action = match mode {
+        TuiMode::Confirm { action, .. } => action.clone(),
+        _ => return,
+    };
+
     match key.code {
         KeyCode::Char('y') | KeyCode::Enter => {
             let (cmd, desc) = match action {
