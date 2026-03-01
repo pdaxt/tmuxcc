@@ -643,7 +643,7 @@ impl AgentOSService {
             &req.description.unwrap_or_default(), &req.assignee.unwrap_or_default(),
             &req.milestone.unwrap_or_default(), &req.labels.unwrap_or_default(),
             req.estimated_acu.unwrap_or(0.0), &req.role.unwrap_or_default(),
-            &req.sprint.unwrap_or_default(),
+            &req.sprint.unwrap_or_default(), &req.parent.unwrap_or_default(),
         );
         Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
     }
@@ -793,6 +793,44 @@ impl AgentOSService {
         Parameters(req): Parameters<BoardViewRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let result = crate::tracker::board_view(&req.space);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    // === FEATURE MANAGEMENT TOOLS (4 tools) ===
+
+    #[tool(description = "List child issues (micro-features) of a parent feature/epic. Shows progress.")]
+    async fn issue_children(
+        &self,
+        Parameters(req): Parameters<IssueChildrenRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::tracker::issue_children(&req.space, &req.parent_id);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Decompose a feature/epic into micro-feature child issues. Creates task issues linked to parent. Children: [{title, description?, priority?, role?, estimated_acu?}]")]
+    async fn feature_decompose(
+        &self,
+        Parameters(req): Parameters<FeatureDecomposeRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::tracker::feature_decompose(&req.space, &req.parent_id, &req.children);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Push tracker issues into the execution queue. Links queue tasks back to issues for auto-status updates on completion. Set sequential=true for ordered execution.")]
+    async fn feature_to_queue(
+        &self,
+        Parameters(req): Parameters<FeatureToQueueRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::tracker::feature_to_queue(&req.space, &req.issue_ids, req.sequential.unwrap_or(false));
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Hierarchical feature status: parent feature → child micro-features → queue task status. Shows overall progress.")]
+    async fn feature_status(
+        &self,
+        Parameters(req): Parameters<FeatureStatusRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::tracker::feature_status(&req.space, &req.feature_id);
         Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
     }
 

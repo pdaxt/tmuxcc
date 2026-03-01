@@ -531,6 +531,8 @@ pub struct IssueCreateRequest {
     pub role: Option<String>,
     #[schemars(description = "Sprint assignment")]
     pub sprint: Option<String>,
+    #[schemars(description = "Parent issue ID for micro-features (e.g. 'DX-1')")]
+    pub parent: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -695,6 +697,44 @@ pub struct ProcessTemplateCreateRequest {
 pub struct BoardViewRequest {
     #[schemars(description = "Space name")]
     pub space: String,
+}
+
+// === FEATURE MANAGEMENT TOOLS ===
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct IssueChildrenRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Parent issue ID (e.g. 'DX-1')")]
+    pub parent_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FeatureDecomposeRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Parent feature/epic issue ID")]
+    pub parent_id: String,
+    #[schemars(description = "Array of micro-features: [{title, description?, priority?, role?, estimated_acu?}]")]
+    pub children: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FeatureToQueueRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Issue IDs to push to the execution queue")]
+    pub issue_ids: Vec<String>,
+    #[schemars(description = "If true, tasks run sequentially (each depends on previous). If false, all run in parallel.")]
+    pub sequential: Option<bool>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FeatureStatusRequest {
+    #[schemars(description = "Space name")]
+    pub space: String,
+    #[schemars(description = "Feature/epic issue ID to show hierarchical status for")]
+    pub feature_id: String,
 }
 
 // === CAPACITY TOOLS ===

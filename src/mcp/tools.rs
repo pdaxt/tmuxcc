@@ -1525,6 +1525,38 @@ pub async fn auto_cycle(app: &App) -> String {
 
                 if let Some(qt) = queue::task_for_pane(i) {
                     let _ = queue::mark_done(&qt.id, &result);
+
+                    // Bridge: auto-update tracker issue when queue task completes
+                    if let (Some(issue_id), Some(space)) = (&qt.issue_id, &qt.space) {
+                        let _ = tracker::issue_update_full(
+                            space, issue_id, "done", "", "", "", "", "",
+                            "", "", 0.0, 0.0, "", "",
+                        );
+                        let _ = tracker::issue_comment(
+                            space, issue_id,
+                            &format!("Auto-completed by AgentOS queue task {}", qt.id),
+                            "agentos",
+                        );
+                        // Check if all siblings are done → close parent
+                        if let Some(issue) = tracker::find_issue(space, issue_id) {
+                            if let Some(parent_id) = issue.get("parent").and_then(|v| v.as_str()) {
+                                let children_status = tracker::issue_children(space, parent_id);
+                                let total = children_status["count"].as_u64().unwrap_or(0);
+                                let done_count = children_status["done"].as_u64().unwrap_or(0);
+                                if total > 0 && done_count == total {
+                                    let _ = tracker::issue_update_full(
+                                        space, parent_id, "done", "", "", "", "", "",
+                                        "", "", 0.0, 0.0, "", "",
+                                    );
+                                    let _ = tracker::issue_comment(
+                                        space, parent_id,
+                                        &format!("All {} micro-features completed. Feature auto-closed.", total),
+                                        "agentos",
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
 
                 occupied_panes.retain(|&p| p != i);
@@ -1540,6 +1572,18 @@ pub async fn auto_cycle(app: &App) -> String {
 
                 if let Some(qt) = queue::task_for_pane(i) {
                     let _ = queue::mark_failed(&qt.id, h.error.as_deref().unwrap_or("unknown error"));
+                    // Bridge: mark tracker issue as blocked on failure
+                    if let (Some(issue_id), Some(space)) = (&qt.issue_id, &qt.space) {
+                        let _ = tracker::issue_update_full(
+                            space, issue_id, "blocked", "", "", "", "", "",
+                            "", "", 0.0, 0.0, "", "",
+                        );
+                        let _ = tracker::issue_comment(
+                            space, issue_id,
+                            &format!("Queue task {} failed: {}", qt.id, h.error.as_deref().unwrap_or("unknown")),
+                            "agentos",
+                        );
+                    }
                 }
                 let _ = kill(app, super::types::KillRequest {
                     pane: i.to_string(),

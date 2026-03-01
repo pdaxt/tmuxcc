@@ -33,6 +33,12 @@ pub struct QueueTask {
     pub max_retries: u32,
     #[serde(default)]
     pub last_error: Option<String>,
+    /// Tracker issue ID this task implements (e.g. "DX-5")
+    #[serde(default)]
+    pub issue_id: Option<String>,
+    /// Tracker space for the linked issue
+    #[serde(default)]
+    pub space: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -178,6 +184,8 @@ pub fn add_task(project: &str, role: &str, task: &str, prompt: &str, priority: u
         retry_count: 0,
         max_retries: 2,
         last_error: None,
+        issue_id: None,
+        space: None,
     };
 
     queue.tasks.push(new_task.clone());

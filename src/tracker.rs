@@ -167,7 +167,7 @@ pub fn load_board_summary() -> std::collections::HashMap<String, usize> {
 pub fn issue_create(
     space: &str, title: &str, issue_type: &str, priority: &str,
     description: &str, assignee: &str, milestone: &str, labels: &[String],
-    estimated_acu: f64, role: &str, sprint: &str,
+    estimated_acu: f64, role: &str, sprint: &str, parent: &str,
 ) -> Value {
     let valid_types = ["bug", "feature", "task", "improvement", "epic"];
     let valid_priorities = ["critical", "high", "medium", "low"];
@@ -185,6 +185,8 @@ pub fn issue_create(
     let prefix = get_prefix(space);
     let issue_id = format!("{}-{}", prefix, number);
 
+    let parent_val = if parent.is_empty() { json!(null) } else { json!(parent) };
+
     let issue = json!({
         "id": issue_id, "number": number, "space": space,
         "title": title, "type": itype, "status": "todo", "priority": ipriority,
@@ -192,6 +194,7 @@ pub fn issue_create(
         "labels": labels, "blocked_by": [], "linked_docs": [], "linked_commits": [],
         "linked_prs": [], "comments": [], "estimated_acu": estimated_acu,
         "actual_acu": 0.0, "role": role, "parallelizable": true, "sprint": sprint,
+        "parent": parent_val,
         "created_at": now_iso(), "updated_at": now_iso(), "closed_at": null,
     });
 
@@ -548,6 +551,218 @@ pub fn process_template_create(name: &str, content: &str) -> Value {
         Ok(()) => json!({"created": name, "path": path.to_string_lossy()}),
         Err(e) => json!({"error": e.to_string()}),
     }
+}
+
+// === FEATURE MANAGEMENT ===
+
+/// List all child issues (micro-features) of a parent issue
+pub fn issue_children(space: &str, parent_id: &str) -> Value {
+    let all = load_issues(space);
+    let children: Vec<Value> = all.into_iter().filter(|i| {
+        i.get("parent").and_then(|v| v.as_str()) == Some(parent_id)
+    }).map(|i| json!({
+        "id": i["id"], "title": i["title"], "type": i["type"], "status": i["status"],
+        "priority": i["priority"], "assignee": i["assignee"],
+        "estimated_acu": i["estimated_acu"], "actual_acu": i["actual_acu"],
+        "role": i["role"],
+    })).collect();
+
+    let total = children.len();
+    let done = children.iter().filter(|c| {
+        let s = c["status"].as_str().unwrap_or("");
+        s == "done" || s == "closed"
+    }).count();
+    let pct = if total > 0 { done * 100 / total } else { 0 };
+
+    json!({
+        "parent": parent_id, "children": children, "count": total,
+        "done": done, "progress": format!("{}%", pct),
+    })
+}
+
+/// Decompose a feature/epic into micro-feature child issues
+pub fn feature_decompose(
+    space: &str, parent_id: &str, children: &[Value],
+) -> Value {
+    // Verify parent exists and is a feature or epic
+    let parent = match load_issue_by_id(space, parent_id) {
+        Some(p) => p,
+        None => return json!({"error": format!("Parent issue not found: {}", parent_id)}),
+    };
+    let ptype = parent["type"].as_str().unwrap_or("");
+    if ptype != "feature" && ptype != "epic" {
+        return json!({"error": format!("Parent must be feature or epic, got: {}", ptype)});
+    }
+
+    let mut created = Vec::new();
+    for child in children {
+        let title = child["title"].as_str().unwrap_or("Untitled");
+        let desc = child["description"].as_str().unwrap_or("");
+        let priority = child["priority"].as_str().unwrap_or(
+            parent["priority"].as_str().unwrap_or("medium")
+        );
+        let role = child["role"].as_str().unwrap_or(
+            parent["role"].as_str().unwrap_or("developer")
+        );
+        let est = child["estimated_acu"].as_f64().unwrap_or(0.0);
+        let milestone = parent["milestone"].as_str().unwrap_or("");
+        let sprint = parent["sprint"].as_str().unwrap_or("");
+
+        let result = issue_create(
+            space, title, "task", priority, desc,
+            "", milestone, &[], est, role, sprint, parent_id,
+        );
+        if let Some(id) = result.get("created").and_then(|v| v.as_str()) {
+            created.push(json!({"id": id, "title": title}));
+        }
+    }
+
+    // Update parent status to in_progress if it was todo
+    if parent["status"].as_str() == Some("todo") {
+        let mut p = parent.clone();
+        p["status"] = json!("in_progress");
+        p["updated_at"] = json!(now_iso());
+        let _ = save_issue_file(space, &p);
+    }
+
+    json!({
+        "parent": parent_id, "created": created, "count": created.len(),
+    })
+}
+
+/// Push tracker issues to the execution queue as tasks
+pub fn feature_to_queue(
+    space: &str, issue_ids: &[String], sequential: bool,
+) -> Value {
+    let mut queued = Vec::new();
+    let mut prev_id: Option<String> = None;
+
+    for issue_id in issue_ids {
+        let issue = match load_issue_by_id(space, issue_id) {
+            Some(i) => i,
+            None => {
+                queued.push(json!({"issue": issue_id, "error": "not_found"}));
+                continue;
+            }
+        };
+
+        let status = issue["status"].as_str().unwrap_or("");
+        if status == "done" || status == "closed" {
+            queued.push(json!({"issue": issue_id, "skipped": "already_done"}));
+            continue;
+        }
+
+        let project = issue["space"].as_str().unwrap_or(space);
+        let role = issue["role"].as_str().unwrap_or("developer");
+        let title = issue["title"].as_str().unwrap_or("");
+        let desc = issue["description"].as_str().unwrap_or("");
+        let priority = match issue["priority"].as_str().unwrap_or("medium") {
+            "critical" => 1u8, "high" => 2, "medium" => 3, "low" => 4, _ => 3,
+        };
+
+        let prompt = format!(
+            "Issue: {} - {}\n\n{}\n\nWhen done, summarize what you accomplished.",
+            issue_id, title, desc,
+        );
+
+        let deps = if sequential {
+            prev_id.iter().cloned().collect()
+        } else {
+            Vec::new()
+        };
+
+        match crate::queue::add_task(project, role, title, &prompt, priority, deps) {
+            Ok(qt) => {
+                // Store issue_id on the queue task
+                let mut q = crate::queue::load_queue();
+                if let Some(t) = q.tasks.iter_mut().find(|t| t.id == qt.id) {
+                    t.issue_id = Some(issue_id.clone());
+                    t.space = Some(space.to_string());
+                }
+                let _ = crate::queue::save_queue(&q);
+
+                // Update tracker issue to in_progress
+                let mut iss = issue.clone();
+                iss["status"] = json!("in_progress");
+                iss["updated_at"] = json!(now_iso());
+                let _ = save_issue_file(space, &iss);
+
+                prev_id = Some(qt.id.clone());
+                queued.push(json!({
+                    "issue": issue_id, "queue_task": qt.id,
+                    "priority": priority, "sequential": sequential,
+                }));
+            }
+            Err(e) => {
+                queued.push(json!({"issue": issue_id, "error": e.to_string()}));
+            }
+        }
+    }
+
+    json!({"queued": queued, "count": queued.len()})
+}
+
+/// Hierarchical feature status: parent → children → queue tasks
+pub fn feature_status(space: &str, feature_id: &str) -> Value {
+    let parent = match load_issue_by_id(space, feature_id) {
+        Some(p) => p,
+        None => return json!({"error": format!("Issue not found: {}", feature_id)}),
+    };
+
+    let all = load_issues(space);
+    let q = crate::queue::load_queue();
+
+    let children: Vec<Value> = all.iter().filter(|i| {
+        i.get("parent").and_then(|v| v.as_str()) == Some(feature_id)
+    }).map(|i| {
+        let child_id = i["id"].as_str().unwrap_or("");
+        // Find queue task for this issue
+        let queue_task = q.tasks.iter().find(|t| {
+            t.issue_id.as_deref() == Some(child_id)
+        });
+        let qt_info = queue_task.map(|t| json!({
+            "queue_id": t.id, "status": format!("{:?}", t.status),
+            "pane": t.pane, "result": t.result,
+        }));
+
+        json!({
+            "id": child_id, "title": i["title"], "status": i["status"],
+            "priority": i["priority"], "role": i["role"],
+            "estimated_acu": i["estimated_acu"], "actual_acu": i["actual_acu"],
+            "queue": qt_info,
+        })
+    }).collect();
+
+    let total = children.len();
+    let done = children.iter().filter(|c| {
+        let s = c["status"].as_str().unwrap_or("");
+        s == "done" || s == "closed"
+    }).count();
+    let in_progress = children.iter().filter(|c| {
+        c["status"].as_str() == Some("in_progress")
+    }).count();
+    let queued = children.iter().filter(|c| {
+        c.get("queue").is_some() && c["queue"] != json!(null)
+    }).count();
+
+    let overall_status = if done == total && total > 0 { "complete" }
+        else if in_progress > 0 || queued > 0 { "in_progress" }
+        else { "planned" };
+
+    json!({
+        "feature": {
+            "id": parent["id"], "title": parent["title"],
+            "type": parent["type"], "status": parent["status"],
+            "milestone": parent["milestone"], "sprint": parent["sprint"],
+        },
+        "children": children,
+        "summary": {
+            "total": total, "done": done, "in_progress": in_progress,
+            "queued": queued,
+            "progress": if total > 0 { format!("{}%", done * 100 / total) } else { "0%".into() },
+            "overall_status": overall_status,
+        },
+    })
 }
 
 // === BOARD ===
