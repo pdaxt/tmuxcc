@@ -39,6 +39,7 @@ async-stream = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }
 nix = { version = "0.30", features = ["signal", "process"] }
 regex = "1"
+libc = "0.2"
 
 # SQLite (knowledge graph, session replay, truthguard)
 rusqlite = { version = "0.31", features = ["bundled"] }

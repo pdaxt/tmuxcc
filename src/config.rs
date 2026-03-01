@@ -197,6 +197,9 @@ pub fn role_short(role: &str) -> &'static str {
 // --- Path helpers ---
 
 pub fn agentos_root() -> PathBuf {
+    if let Ok(root) = std::env::var("AGENTOS_ROOT") {
+        return PathBuf::from(root);
+    }
     home_dir().join(".config").join("agentos")
 }
 

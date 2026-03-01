@@ -48,7 +48,9 @@ pub async fn spawn(app: &App, req: SpawnRequest) -> String {
     }
 
     // Git-first: create worktree for isolation if project is a git repo
-    let (spawn_cwd, ws_path, ws_branch, ws_base) = if workspace::is_git_repo(&project_path) {
+    // Skip worktrees if AGENTOS_SKIP_WORKTREES is set (useful for demos/testing)
+    let skip_worktrees = std::env::var("AGENTOS_SKIP_WORKTREES").is_ok();
+    let (spawn_cwd, ws_path, ws_branch, ws_base) = if !skip_worktrees && workspace::is_git_repo(&project_path) {
         match workspace::create_worktree(&project_path, pane_num, &task) {
             Ok(info) => {
                 tracing::info!("Created worktree for pane {}: {} (branch {})", pane_num, info.worktree_path, info.branch_name);
@@ -60,6 +62,9 @@ pub async fn spawn(app: &App, req: SpawnRequest) -> String {
             }
         }
     } else {
+        if skip_worktrees {
+            tracing::info!("Skipping worktree for pane {} (AGENTOS_SKIP_WORKTREES set)", pane_num);
+        }
         (project_path.clone(), None, None, None)
     };
 
@@ -74,10 +79,9 @@ pub async fn spawn(app: &App, req: SpawnRequest) -> String {
     let machine_id = machine::register(pane_num);
 
     // Build env vars (includes machine identity)
-    let config_dir = claude::account_config_dir(pane_num);
+    // Don't override CLAUDE_CONFIG_DIR — let agents use default ~/.claude auth
     let env_vars = vec![
         ("P".to_string(), pane_num.to_string()),
-        ("CLAUDE_CONFIG_DIR".to_string(), config_dir),
         ("MACHINE_IP".to_string(), machine_id.ip.clone()),
         ("MACHINE_HOSTNAME".to_string(), machine_id.hostname.clone()),
         ("MACHINE_MAC".to_string(), machine_id.mac.clone()),
@@ -1466,6 +1470,26 @@ pub async fn queue_done(_app: &App, req: QueueDoneRequest) -> String {
 
 /// Auto-cycle: scan all panes, complete finished agents, spawn next tasks
 pub async fn auto_cycle(app: &App) -> String {
+    // Process-level lock: only one agentos instance runs auto-cycle at a time
+    let lock_path = config::agentos_root().join("auto_cycle.lock");
+    let lock_file = match std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&lock_path)
+    {
+        Ok(f) => f,
+        Err(_) => return "lock_error".into(),
+    };
+    use std::os::unix::io::AsRawFd;
+    let fd = lock_file.as_raw_fd();
+    let lock_result = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
+    if lock_result != 0 {
+        return "lock_held_by_another_instance".into();
+    }
+    // Write our PID so we can debug which instance holds the lock
+    let _ = std::fs::write(&lock_path, format!("{}", std::process::id()));
+
     let cfg = queue::load_auto_config();
     let mut actions = Vec::new();
     let mut occupied_panes = Vec::new();
