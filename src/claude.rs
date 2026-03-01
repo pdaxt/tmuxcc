@@ -106,20 +106,38 @@ pub fn generate_preamble(
     )
 }
 
-/// Get the account config dir for a pane (alternates between accounts)
-/// Falls back to default ~/.claude if account dirs don't exist
+/// Get the account config dir for a pane — distributes panes across all available accounts.
+/// Discovers ~/.claude-acc1, ~/.claude-acc2, ... ~/.claude-accN automatically.
+/// Panes are assigned round-robin: pane 1 → acc1, pane 2 → acc2, ..., pane N+1 → acc1.
+/// Falls back to ~/.claude if no account dirs exist.
 pub fn account_config_dir(pane: u8) -> String {
     let home = config::home_dir();
-    let acc_dir = if pane % 2 == 1 {
-        home.join(".claude-acc1")
-    } else {
-        home.join(".claude-acc2")
-    };
-    if acc_dir.exists() {
-        acc_dir.to_string_lossy().to_string()
-    } else {
-        home.join(".claude").to_string_lossy().to_string()
+    let accounts = discover_account_dirs(&home);
+    if accounts.is_empty() {
+        return home.join(".claude").to_string_lossy().to_string();
     }
+    let idx = ((pane as usize).wrapping_sub(1)) % accounts.len();
+    accounts[idx].to_string_lossy().to_string()
+}
+
+/// Discover all ~/.claude-accN directories, sorted by N
+fn discover_account_dirs(home: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut dirs: Vec<(u32, std::path::PathBuf)> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(home) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if let Some(num_str) = name.strip_prefix(".claude-acc") {
+                if let Ok(n) = num_str.parse::<u32>() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        dirs.push((n, path));
+                    }
+                }
+            }
+        }
+    }
+    dirs.sort_by_key(|(n, _)| *n);
+    dirs.into_iter().map(|(_, p)| p).collect()
 }
 
 /// Check if preamble exists
