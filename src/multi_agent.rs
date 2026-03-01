@@ -113,6 +113,113 @@ CREATE TABLE IF NOT EXISTS schema_version (
     version    INTEGER PRIMARY KEY,
     applied_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS sessions (
+    session_id    TEXT PRIMARY KEY,
+    pane_id       TEXT NOT NULL,
+    project       TEXT NOT NULL DEFAULT '',
+    started_at    TEXT NOT NULL,
+    ended_at      TEXT,
+    duration_secs INTEGER,
+    tool_calls    INTEGER NOT NULL DEFAULT 0,
+    errors        INTEGER NOT NULL DEFAULT 0,
+    files_touched INTEGER NOT NULL DEFAULT 0,
+    commits       INTEGER NOT NULL DEFAULT 0,
+    status        TEXT NOT NULL DEFAULT 'active',
+    summary       TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_pane ON sessions(pane_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+
+CREATE TABLE IF NOT EXISTS tool_calls (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id   TEXT,
+    pane_id      TEXT NOT NULL,
+    project      TEXT NOT NULL DEFAULT '',
+    tool_name    TEXT NOT NULL,
+    mcp_name     TEXT,
+    tool_short   TEXT,
+    input_size   INTEGER NOT NULL DEFAULT 0,
+    output_size  INTEGER NOT NULL DEFAULT 0,
+    latency_ms   INTEGER NOT NULL DEFAULT 0,
+    success      INTEGER NOT NULL DEFAULT 1,
+    error_preview TEXT,
+    timestamp    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tc_pane ON tool_calls(pane_id);
+CREATE INDEX IF NOT EXISTS idx_tc_ts ON tool_calls(timestamp);
+CREATE INDEX IF NOT EXISTS idx_tc_tool ON tool_calls(tool_name);
+
+CREATE TABLE IF NOT EXISTS file_operations (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id   TEXT,
+    pane_id      TEXT NOT NULL,
+    project      TEXT NOT NULL DEFAULT '',
+    file_path    TEXT NOT NULL,
+    operation    TEXT NOT NULL,
+    lines_changed INTEGER NOT NULL DEFAULT 0,
+    timestamp    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fops_pane ON file_operations(pane_id);
+CREATE INDEX IF NOT EXISTS idx_fops_ts ON file_operations(timestamp);
+
+CREATE TABLE IF NOT EXISTS token_usage (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id    TEXT,
+    pane_id       TEXT NOT NULL,
+    project       TEXT NOT NULL DEFAULT '',
+    model         TEXT NOT NULL,
+    input_tokens  INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read    INTEGER NOT NULL DEFAULT 0,
+    cache_write   INTEGER NOT NULL DEFAULT 0,
+    cost_usd      REAL NOT NULL DEFAULT 0.0,
+    timestamp     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_tokens_pane ON token_usage(pane_id);
+CREATE INDEX IF NOT EXISTS idx_tokens_ts ON token_usage(timestamp);
+
+CREATE TABLE IF NOT EXISTS quality_events (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id   TEXT,
+    pane_id      TEXT NOT NULL,
+    project      TEXT NOT NULL DEFAULT '',
+    event_type   TEXT NOT NULL,
+    command      TEXT NOT NULL DEFAULT '',
+    success      INTEGER NOT NULL DEFAULT 1,
+    total_count  INTEGER NOT NULL DEFAULT 0,
+    pass_count   INTEGER NOT NULL DEFAULT 0,
+    fail_count   INTEGER NOT NULL DEFAULT 0,
+    skip_count   INTEGER NOT NULL DEFAULT 0,
+    duration_ms  INTEGER NOT NULL DEFAULT 0,
+    output       TEXT NOT NULL DEFAULT '',
+    timestamp    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_qe_project ON quality_events(project);
+CREATE INDEX IF NOT EXISTS idx_qe_type ON quality_events(event_type);
+
+CREATE TABLE IF NOT EXISTS git_commits (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id    TEXT,
+    pane_id       TEXT NOT NULL,
+    project       TEXT NOT NULL DEFAULT '',
+    repo_path     TEXT NOT NULL DEFAULT '',
+    commit_hash   TEXT NOT NULL DEFAULT '',
+    branch        TEXT NOT NULL DEFAULT '',
+    message       TEXT NOT NULL DEFAULT '',
+    files_changed INTEGER NOT NULL DEFAULT 0,
+    insertions    INTEGER NOT NULL DEFAULT 0,
+    deletions     INTEGER NOT NULL DEFAULT 0,
+    timestamp     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_gc_project ON git_commits(project);
+CREATE INDEX IF NOT EXISTS idx_gc_ts ON git_commits(timestamp);
+
+CREATE TABLE IF NOT EXISTS task_deps (
+    task_id    TEXT NOT NULL,
+    depends_on TEXT NOT NULL,
+    PRIMARY KEY (task_id, depends_on)
+);
 "#;
 
 // ============================================================================
@@ -123,7 +230,7 @@ fn registry_dir() -> PathBuf {
     config::multi_agent_root()
 }
 
-fn coordination_db() -> Result<Connection, String> {
+pub(crate) fn coordination_db() -> Result<Connection, String> {
     let dir = registry_dir();
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("coordination.db");
@@ -133,10 +240,33 @@ fn coordination_db() -> Result<Connection, String> {
     ).map_err(|e| format!("DB pragma: {}", e))?;
     conn.execute_batch(COORDINATION_SCHEMA).map_err(|e| format!("DB schema: {}", e))?;
     maybe_migrate_json(&conn);
+    maybe_migrate_schema(&conn);
     Ok(conn)
 }
 
-fn now_iso() -> String {
+/// Idempotent schema migration: ALTER TABLE for columns added after initial release.
+/// Each ALTER is wrapped in error suppression so it's safe to run repeatedly.
+fn maybe_migrate_schema(conn: &Connection) {
+    // Agents table: add FORGE-ported columns
+    let agent_alters = [
+        "ALTER TABLE agents ADD COLUMN display_name TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE agents ADD COLUMN role TEXT NOT NULL DEFAULT 'agent'",
+        "ALTER TABLE agents ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
+        "ALTER TABLE agents ADD COLUMN session_id TEXT",
+        "ALTER TABLE agents ADD COLUMN last_heartbeat TEXT",
+        "ALTER TABLE agents ADD COLUMN last_tool_call TEXT",
+        "ALTER TABLE agents ADD COLUMN deregistered_at TEXT",
+        "ALTER TABLE agents ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}'",
+    ];
+    for sql in &agent_alters {
+        let _ = conn.execute(sql, []);
+    }
+
+    // File locks: add expiry support
+    let _ = conn.execute("ALTER TABLE file_locks ADD COLUMN expires_at TEXT", []);
+}
+
+pub(crate) fn now_iso() -> String {
     Local::now().format("%Y-%m-%dT%H:%M:%S").to_string()
 }
 
@@ -521,21 +651,28 @@ pub fn agent_register(pane_id: &str, project: &str, task: &str, files: &[String]
     let conn = match coordination_db() { Ok(c) => c, Err(e) => return json!({"error": e}) };
     let now = now_iso();
     let files_json = serde_json::to_string(files).unwrap_or_else(|_| "[]".into());
+    let session_id = uuid::Uuid::new_v4().to_string();
 
     let _ = conn.execute(
-        "INSERT INTO agents (pane_id, project, task, files, registered_at, last_update) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
-         ON CONFLICT(pane_id) DO UPDATE SET project=?2, task=?3, files=?4, last_update=?6",
-        params![pane_id, project, task, files_json, now, now]
+        "INSERT INTO agents (pane_id, project, task, files, registered_at, last_update, session_id, last_heartbeat, status) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'active') \
+         ON CONFLICT(pane_id) DO UPDATE SET project=?2, task=?3, files=?4, last_update=?6, session_id=?7, last_heartbeat=?8, status='active', deregistered_at=NULL",
+        params![pane_id, project, task, files_json, now, now, session_id, now]
+    );
+
+    // Create session record
+    let _ = conn.execute(
+        "INSERT INTO sessions (session_id, pane_id, project, started_at) VALUES (?1, ?2, ?3, ?4)",
+        params![session_id, pane_id, project, now]
     );
 
     // Find other agents on same project
     let mut others = vec![];
     let mut stmt = match conn.prepare(
-        "SELECT pane_id, task FROM agents WHERE project = ?1 AND pane_id != ?2"
+        "SELECT pane_id, task FROM agents WHERE project = ?1 AND pane_id != ?2 AND status = 'active'"
     ) {
         Ok(s) => s,
-        Err(_) => return json!({"status": "registered", "other_agents": []}),
+        Err(_) => return json!({"status": "registered", "session_id": session_id, "other_agents": []}),
     };
     if let Ok(rows) = stmt.query_map(params![project, pane_id], |r| {
         Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
@@ -544,7 +681,7 @@ pub fn agent_register(pane_id: &str, project: &str, task: &str, files: &[String]
             others.push(json!({"pane": row.0, "task": row.1}));
         }
     }
-    json!({"status": "registered", "other_agents": others})
+    json!({"status": "registered", "session_id": session_id, "other_agents": others})
 }
 
 /// Update an agent's task and optionally its file list.
@@ -608,9 +745,230 @@ pub fn agent_list(project: Option<&str>) -> Value {
 /// Remove an agent from the coordination DB. CASCADE deletes its file locks.
 pub fn agent_deregister(pane_id: &str) -> Value {
     let conn = match coordination_db() { Ok(c) => c, Err(e) => return json!({"error": e}) };
-    // CASCADE deletes file_locks owned by this agent
-    let rows = conn.execute("DELETE FROM agents WHERE pane_id = ?1", params![pane_id]).unwrap_or(0);
+    let now = now_iso();
+
+    // End any active session
+    let session_id: Option<String> = conn.query_row(
+        "SELECT session_id FROM agents WHERE pane_id = ?1", params![pane_id], |r| r.get(0)
+    ).ok();
+
+    if let Some(ref sid) = session_id {
+        let _ = conn.execute(
+            "UPDATE sessions SET ended_at = ?1, status = 'ended', \
+             duration_secs = CAST((julianday(?1) - julianday(started_at)) * 86400 AS INTEGER) \
+             WHERE session_id = ?2 AND status = 'active'",
+            params![now, sid]
+        );
+    }
+
+    // Mark as deregistered (keep for history) and release locks
+    let rows = conn.execute(
+        "UPDATE agents SET status = 'deregistered', deregistered_at = ?1 WHERE pane_id = ?2",
+        params![now, pane_id]
+    ).unwrap_or(0);
+
+    // Release locks held by this agent
+    let _ = conn.execute("DELETE FROM file_locks WHERE pane_id = ?1", params![pane_id]);
+    // Release ports
+    let _ = conn.execute("DELETE FROM ports WHERE pane_id = ?1", params![pane_id]);
+    // Release git branches
+    let _ = conn.execute("DELETE FROM git_branches WHERE pane_id = ?1", params![pane_id]);
+
     if rows > 0 { json!({"status": "deregistered"}) } else { json!({"status": "not_found"}) }
+}
+
+// ============================================================================
+// LIFECYCLE (heartbeat, sessions, who)
+// ============================================================================
+
+/// Update agent heartbeat and optionally its current task/status.
+pub fn heartbeat(pane_id: &str, task: Option<&str>, status: Option<&str>) -> Value {
+    let conn = match coordination_db() { Ok(c) => c, Err(e) => return json!({"error": e}) };
+    let now = now_iso();
+
+    let rows = if let Some(t) = task {
+        conn.execute(
+            "UPDATE agents SET last_heartbeat = ?1, last_update = ?1, task = ?2 WHERE pane_id = ?3 AND status = 'active'",
+            params![now, t, pane_id]
+        ).unwrap_or(0)
+    } else {
+        conn.execute(
+            "UPDATE agents SET last_heartbeat = ?1, last_update = ?1 WHERE pane_id = ?2 AND status = 'active'",
+            params![now, pane_id]
+        ).unwrap_or(0)
+    };
+
+    if let Some(s) = status {
+        let _ = conn.execute(
+            "UPDATE agents SET status = ?1 WHERE pane_id = ?2",
+            params![s, pane_id]
+        );
+    }
+
+    if rows > 0 { json!({"status": "ok", "heartbeat": now}) } else { json!({"error": "agent not found or not active"}) }
+}
+
+/// Start a new tracking session for an agent.
+pub fn session_start(pane_id: &str, project: &str) -> Value {
+    let conn = match coordination_db() { Ok(c) => c, Err(e) => return json!({"error": e}) };
+    let now = now_iso();
+    let session_id = uuid::Uuid::new_v4().to_string();
+
+    let _ = conn.execute(
+        "INSERT INTO sessions (session_id, pane_id, project, started_at) VALUES (?1, ?2, ?3, ?4)",
+        params![session_id, pane_id, project, now]
+    );
+
+    // Link session to agent
+    let _ = conn.execute(
+        "UPDATE agents SET session_id = ?1, last_heartbeat = ?2 WHERE pane_id = ?3",
+        params![session_id, now, pane_id]
+    );
+
+    json!({"session_id": session_id, "started_at": now})
+}
+
+/// End a tracking session with summary.
+pub fn session_end(session_id: &str, summary: &str) -> Value {
+    let conn = match coordination_db() { Ok(c) => c, Err(e) => return json!({"error": e}) };
+    let now = now_iso();
+
+    let rows = conn.execute(
+        "UPDATE sessions SET ended_at = ?1, status = 'ended', summary = ?2, \
+         duration_secs = CAST((julianday(?1) - julianday(started_at)) * 86400 AS INTEGER) \
+         WHERE session_id = ?3 AND status = 'active'",
+        params![now, summary, session_id]
+    ).unwrap_or(0);
+
+    if rows > 0 { json!({"status": "ended", "ended_at": now}) } else { json!({"error": "session not found or already ended"}) }
+}
+
+/// List all active agents (simple view).
+pub fn who() -> Value {
+    let conn = match coordination_db() { Ok(c) => c, Err(e) => return json!({"error": e}) };
+    let mut agents = vec![];
+    let mut stmt = match conn.prepare(
+        "SELECT pane_id, project, task, status, last_heartbeat, session_id FROM agents WHERE status IN ('active', 'busy', 'idle')"
+    ) {
+        Ok(s) => s,
+        Err(e) => return json!({"error": format!("Query: {}", e)}),
+    };
+    if let Ok(rows) = stmt.query_map([], |r| {
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, String>(1)?,
+            r.get::<_, String>(2)?,
+            r.get::<_, String>(3)?,
+            r.get::<_, Option<String>>(4)?,
+            r.get::<_, Option<String>>(5)?,
+        ))
+    }) {
+        for row in rows.flatten() {
+            agents.push(json!({
+                "pane_id": row.0, "project": row.1, "task": row.2,
+                "status": row.3, "last_heartbeat": row.4, "session_id": row.5,
+                "tmux_active": is_pane_active(&row.0)
+            }));
+        }
+    }
+    json!({"agents": agents, "count": agents.len()})
+}
+
+/// Force-steal a lock with justification. Releases existing lock holder.
+pub fn lock_steal(pane_id: &str, file_path: &str, reason: &str) -> Value {
+    let conn = match coordination_db() { Ok(c) => c, Err(e) => return json!({"error": e}) };
+    let now = now_iso();
+
+    // Check who currently holds the lock
+    let prev: Option<(String, String)> = conn.query_row(
+        "SELECT pane_id, reason FROM file_locks WHERE file_path = ?1",
+        params![file_path], |r| Ok((r.get(0)?, r.get(1)?))
+    ).ok();
+
+    // Delete existing and insert new
+    let _ = conn.execute("DELETE FROM file_locks WHERE file_path = ?1", params![file_path]);
+    let _ = conn.execute(
+        "INSERT INTO file_locks (file_path, pane_id, reason, acquired_at) VALUES (?1, ?2, ?3, ?4)",
+        params![file_path, pane_id, reason, now]
+    );
+
+    json!({
+        "status": "stolen",
+        "file": file_path,
+        "previous_holder": prev.as_ref().map(|p| &p.0),
+        "previous_reason": prev.as_ref().map(|p| &p.1),
+        "reason": reason
+    })
+}
+
+/// Detect concurrent work on same files across agents.
+pub fn conflict_scan(project: Option<&str>) -> Value {
+    let conn = match coordination_db() { Ok(c) => c, Err(e) => return json!({"error": e}) };
+    let mut conflicts = vec![];
+
+    // Find files locked by different agents working on the same project
+    {
+        let query = if project.is_some() {
+            "SELECT fl.file_path, fl.pane_id, fl.reason, a.project \
+             FROM file_locks fl JOIN agents a ON fl.pane_id = a.pane_id \
+             WHERE a.project = ?1 AND a.status = 'active'"
+        } else {
+            "SELECT fl.file_path, fl.pane_id, fl.reason, a.project \
+             FROM file_locks fl JOIN agents a ON fl.pane_id = a.pane_id \
+             WHERE a.status = 'active'"
+        };
+        if let Ok(mut stmt) = conn.prepare(query) {
+            let extract = |r: &rusqlite::Row| -> rusqlite::Result<(String, String, String, String)> {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            };
+            let rows = if let Some(p) = project {
+                stmt.query_map(params![p], extract)
+            } else {
+                stmt.query_map([], extract)
+            };
+            if let Ok(rows) = rows {
+                for row in rows.flatten() {
+                    conflicts.push(json!({"file": row.0, "holder": row.1, "reason": row.2, "project": row.3}));
+                }
+            }
+        }
+    }
+
+    // Also check agent file lists for overlap (not just locks)
+    let mut file_agents: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    {
+        let query = if project.is_some() {
+            "SELECT pane_id, files FROM agents WHERE status = 'active' AND project = ?1"
+        } else {
+            "SELECT pane_id, files FROM agents WHERE status = 'active'"
+        };
+        if let Ok(mut stmt) = conn.prepare(query) {
+            let extract = |r: &rusqlite::Row| -> rusqlite::Result<(String, String)> {
+                Ok((r.get(0)?, r.get(1)?))
+            };
+            let rows = if let Some(p) = project {
+                stmt.query_map(params![p], extract)
+            } else {
+                stmt.query_map([], extract)
+            };
+            if let Ok(rows) = rows {
+                for row in rows.flatten() {
+                    if let Ok(files) = serde_json::from_str::<Vec<String>>(&row.1) {
+                        for f in files {
+                            file_agents.entry(f).or_default().push(row.0.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let overlaps: Vec<Value> = file_agents.iter()
+        .filter(|(_, agents)| agents.len() > 1)
+        .map(|(f, agents)| json!({"file": f, "agents": agents}))
+        .collect();
+
+    json!({"locks": conflicts, "file_overlaps": overlaps})
 }
 
 // ============================================================================

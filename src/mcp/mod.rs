@@ -1397,6 +1397,222 @@ impl AgentOSService {
         let result = tools::machine_list_tool();
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
+
+    // === ANALYTICS (ported from FORGE) ===
+
+    #[tool(description = "Log a tool call for analytics tracking. Auto-parses MCP name from tool_name.")]
+    async fn log_tool_call(&self, Parameters(req): Parameters<LogToolCallRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::analytics::log_tool_call(&req.pane_id, &req.tool_name, req.input_size.unwrap_or(0), req.output_size.unwrap_or(0),
+            req.latency_ms, req.success.unwrap_or(true), req.error_preview.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Log a file operation (read/write/edit/delete) for tracking.")]
+    async fn log_file_op(&self, Parameters(req): Parameters<LogFileOpRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::analytics::log_file_op(&req.pane_id, &req.file_path, &req.operation, req.lines_changed);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Log token usage and costs for a model interaction.")]
+    async fn log_tokens(&self, Parameters(req): Parameters<LogTokensRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::analytics::log_tokens(&req.pane_id, &req.model, req.input_tokens, req.output_tokens,
+            req.cache_read.unwrap_or(0), req.cache_write.unwrap_or(0));
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Log a git commit with stats (files changed, insertions, deletions).")]
+    async fn log_git_commit(&self, Parameters(req): Parameters<LogGitCommitRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::analytics::log_git_commit(&req.pane_id, &req.project, &req.repo_path.unwrap_or_default(),
+            &req.commit_hash, &req.branch.unwrap_or_default(), &req.message,
+            req.files_changed.unwrap_or(0), req.insertions.unwrap_or(0), req.deletions.unwrap_or(0));
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Get usage report: tool calls, errors, file ops over N days.")]
+    async fn usage_report(&self, Parameters(req): Parameters<UsageReportRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::analytics::usage_report(req.pane_id.as_deref(), req.project.as_deref(), req.days.unwrap_or(7));
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Rank tools by usage count, error rate, and average latency.")]
+    async fn tool_ranking(&self, Parameters(req): Parameters<ToolRankingRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::analytics::tool_ranking(req.project.as_deref(), req.days.unwrap_or(7), req.limit.unwrap_or(20));
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Check MCP server health: error rates grouped by MCP server.")]
+    async fn mcp_health(&self, Parameters(req): Parameters<McpHealthRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::analytics::mcp_health(req.days.unwrap_or(7));
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Get chronological activity feed for an agent (tool calls, file ops, commits).")]
+    async fn agent_activity(&self, Parameters(req): Parameters<AgentActivityRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::analytics::agent_activity(&req.pane_id, req.limit.unwrap_or(50));
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Get token cost report broken down by model with cache analysis.")]
+    async fn cost_report(&self, Parameters(req): Parameters<CostReportRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::analytics::cost_report(req.project.as_deref(), req.days.unwrap_or(30));
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Get time-series metrics with daily/weekly/monthly granularity.")]
+    async fn trends(&self, Parameters(req): Parameters<TrendsRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::analytics::trends(&req.metric, req.project.as_deref(), &req.granularity.unwrap_or_else(|| "daily".into()), req.periods.unwrap_or(30));
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    // === QUALITY (ported from FORGE) ===
+
+    #[tool(description = "Log test results (total, passed, failed, skipped, duration).")]
+    async fn log_test(&self, Parameters(req): Parameters<LogTestRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::quality::log_test(&req.pane_id, &req.project, req.command.as_deref(), req.success,
+            req.total, req.passed, req.failed, req.skipped, req.duration_ms, req.output.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Log build result (success, duration, output).")]
+    async fn log_build(&self, Parameters(req): Parameters<LogBuildRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::quality::log_build(&req.pane_id, &req.project, req.command.as_deref(), req.success,
+            req.duration_ms, req.output.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Log lint results (errors, warnings).")]
+    async fn log_lint(&self, Parameters(req): Parameters<LogLintRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::quality::log_lint(&req.pane_id, &req.project, req.command.as_deref(), req.success,
+            req.total, req.errors, req.warnings, req.output.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Log deployment result (target, success, duration).")]
+    async fn log_deploy(&self, Parameters(req): Parameters<LogDeployRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::quality::log_deploy(&req.pane_id, &req.project, req.target.as_deref(), req.success,
+            req.duration_ms, req.output.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Get quality report: pass rates by event type over N days.")]
+    async fn quality_report(&self, Parameters(req): Parameters<QualityReportRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::quality::quality_report(&req.project, req.days.unwrap_or(7));
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Quality gate: PASS/FAIL based on latest test + build results.")]
+    async fn quality_gate(&self, Parameters(req): Parameters<QualityGateRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::quality::quality_gate(&req.project);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Detect regressions: compare recent vs older pass rates, flag >5% drops.")]
+    async fn regressions(&self, Parameters(req): Parameters<RegressionsRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::quality::regressions(&req.project, req.days.unwrap_or(14));
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Project health score (0-100): test_rate*40 + build_rate*40 + (1-error_rate)*20.")]
+    async fn project_health(&self, Parameters(req): Parameters<ProjectHealthRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::quality::project_health(&req.project);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    // === DASHBOARD (ported from FORGE) ===
+
+    #[tool(description = "God view: agents, tasks, locks, ports, quality, recent activity.")]
+    async fn dash_overview(&self, Parameters(req): Parameters<DashOverviewRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::dashboard::dash_overview(req.project.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Deep dive on one agent: status, recent tools, locks, session stats.")]
+    async fn dash_agent_detail(&self, Parameters(req): Parameters<DashAgentDetailRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::dashboard::dash_agent_detail(&req.pane_id);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Project view: agents, tasks, quality, commits, knowledge.")]
+    async fn dash_project(&self, Parameters(req): Parameters<DashProjectRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::dashboard::dash_project(&req.project);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Agent leaderboard: ranked by tool_calls, success_rate, active_days.")]
+    async fn dash_leaderboard(&self, Parameters(req): Parameters<DashLeaderboardRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::dashboard::dash_leaderboard(req.days.unwrap_or(7), req.project.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Chronological event stream (tool calls + commits).")]
+    async fn dash_timeline(&self, Parameters(req): Parameters<DashTimelineRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::dashboard::dash_timeline(req.project.as_deref(), req.pane_id.as_deref(), req.limit.unwrap_or(50));
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Alerts: dead agents, high error rates, failed tests, expired locks.")]
+    async fn dash_alerts(&self, Parameters(req): Parameters<DashAlertsRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::dashboard::dash_alerts(req.project.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "24h summary: tool_calls, errors, commits, files_touched.")]
+    async fn dash_daily_digest(&self, Parameters(req): Parameters<DashDailyDigestRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::dashboard::dash_daily_digest(req.project.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "JSON data export: agents, usage, quality reports.")]
+    async fn dash_export(&self, Parameters(req): Parameters<DashExportRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::dashboard::dash_export(&req.report, req.project.as_deref(), req.days.unwrap_or(30));
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    // === LIFECYCLE (heartbeat, sessions, who, lock_steal, conflict_scan) ===
+
+    #[tool(description = "Send heartbeat to keep agent alive. Optionally update task/status.")]
+    async fn heartbeat(&self, Parameters(req): Parameters<HeartbeatRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::heartbeat(&req.pane_id, req.task.as_deref(), req.status.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Start a new tracking session for an agent.")]
+    async fn session_start(&self, Parameters(req): Parameters<SessionStartRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::session_start(&req.pane_id, &req.project);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "End a tracking session with summary.")]
+    async fn session_end(&self, Parameters(req): Parameters<SessionEndRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::session_end(&req.session_id, &req.summary.unwrap_or_default());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "List all active agents (simple view with heartbeat status).")]
+    async fn who(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::who();
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Force-steal a file lock with justification.")]
+    async fn lock_steal(&self, Parameters(req): Parameters<LockStealRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::lock_steal(&req.pane_id, &req.file_path, &req.reason);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Detect concurrent work on same files across agents.")]
+    async fn conflict_scan(&self, Parameters(req): Parameters<ConflictScanRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::conflict_scan(req.project.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    // === DATA RETENTION ===
+
+    #[tool(description = "Manually prune old data according to retention policies.")]
+    async fn prune_data(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::engine::retention::prune_manual();
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
 }
 
 #[tool_handler]

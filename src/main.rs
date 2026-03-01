@@ -15,6 +15,10 @@ mod multi_agent;
 mod collab;
 mod knowledge;
 mod machine;
+mod analytics;
+mod quality;
+mod dashboard;
+mod engine;
 
 use std::sync::Arc;
 use clap::{Parser, Subcommand};
@@ -99,6 +103,9 @@ async fn run_mcp_mode(app: Arc<app::App>, web_port: u16, no_web: bool) -> anyhow
         });
         tracing::info!("Web dashboard at http://localhost:{}", web_port);
     }
+
+    // Background engine: dead agent reaper, lock expiry, data retention
+    engine::start_background_tasks().await;
 
     // Background auto-cycle timer — reads interval from config, runs auto_cycle periodically
     let cycle_app = Arc::clone(&app);

@@ -1270,3 +1270,345 @@ pub struct MachineInfoRequest {
     #[schemars(description = "Pane reference (number or theme name). Omit to list all machines.")]
     pub pane: Option<String>,
 }
+
+// ============================================================================
+// ANALYTICS TYPES
+// ============================================================================
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct LogToolCallRequest {
+    #[schemars(description = "Agent pane_id")]
+    pub pane_id: String,
+    #[schemars(description = "Full tool name (e.g. mcp__google-cloud__sheets_read)")]
+    pub tool_name: String,
+    #[schemars(description = "Input size in bytes")]
+    pub input_size: Option<i64>,
+    #[schemars(description = "Output size in bytes")]
+    pub output_size: Option<i64>,
+    #[schemars(description = "Latency in milliseconds")]
+    pub latency_ms: Option<i64>,
+    #[schemars(description = "Whether the tool call succeeded")]
+    pub success: Option<bool>,
+    #[schemars(description = "First 200 chars of error if failed")]
+    pub error_preview: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct LogFileOpRequest {
+    #[schemars(description = "Agent pane_id")]
+    pub pane_id: String,
+    #[schemars(description = "File path operated on")]
+    pub file_path: String,
+    #[schemars(description = "Operation type: read, write, edit, delete")]
+    pub operation: String,
+    #[schemars(description = "Number of lines changed")]
+    pub lines_changed: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct LogTokensRequest {
+    #[schemars(description = "Agent pane_id")]
+    pub pane_id: String,
+    #[schemars(description = "Model name (e.g. claude-sonnet-4-5-20250929)")]
+    pub model: String,
+    #[schemars(description = "Input tokens")]
+    pub input_tokens: i64,
+    #[schemars(description = "Output tokens")]
+    pub output_tokens: i64,
+    #[schemars(description = "Cache read tokens")]
+    pub cache_read: Option<i64>,
+    #[schemars(description = "Cache write tokens")]
+    pub cache_write: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct LogGitCommitRequest {
+    #[schemars(description = "Agent pane_id")]
+    pub pane_id: String,
+    #[schemars(description = "Project name")]
+    pub project: String,
+    #[schemars(description = "Repository path")]
+    pub repo_path: Option<String>,
+    #[schemars(description = "Commit hash")]
+    pub commit_hash: String,
+    #[schemars(description = "Branch name")]
+    pub branch: Option<String>,
+    #[schemars(description = "Commit message")]
+    pub message: String,
+    #[schemars(description = "Files changed count")]
+    pub files_changed: Option<i64>,
+    #[schemars(description = "Lines inserted")]
+    pub insertions: Option<i64>,
+    #[schemars(description = "Lines deleted")]
+    pub deletions: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct UsageReportRequest {
+    #[schemars(description = "Filter by pane_id")]
+    pub pane_id: Option<String>,
+    #[schemars(description = "Filter by project")]
+    pub project: Option<String>,
+    #[schemars(description = "Number of days to look back (default 7)")]
+    pub days: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ToolRankingRequest {
+    #[schemars(description = "Filter by project")]
+    pub project: Option<String>,
+    #[schemars(description = "Number of days to look back (default 7)")]
+    pub days: Option<i64>,
+    #[schemars(description = "Max tools to return (default 20)")]
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct McpHealthRequest {
+    #[schemars(description = "Number of days to look back (default 7)")]
+    pub days: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct AgentActivityRequest {
+    #[schemars(description = "Agent pane_id")]
+    pub pane_id: String,
+    #[schemars(description = "Max events to return (default 50)")]
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CostReportRequest {
+    #[schemars(description = "Filter by project")]
+    pub project: Option<String>,
+    #[schemars(description = "Number of days (default 30)")]
+    pub days: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct TrendsRequest {
+    #[schemars(description = "Metric: tool_calls, tokens, errors, files, commits")]
+    pub metric: String,
+    #[schemars(description = "Filter by project")]
+    pub project: Option<String>,
+    #[schemars(description = "Granularity: daily, weekly, monthly (default daily)")]
+    pub granularity: Option<String>,
+    #[schemars(description = "Number of days of data (default 30)")]
+    pub periods: Option<i64>,
+}
+
+// ============================================================================
+// QUALITY TYPES
+// ============================================================================
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct LogTestRequest {
+    #[schemars(description = "Agent pane_id")]
+    pub pane_id: String,
+    #[schemars(description = "Project name")]
+    pub project: String,
+    #[schemars(description = "Test command run")]
+    pub command: Option<String>,
+    #[schemars(description = "Whether tests passed")]
+    pub success: bool,
+    #[schemars(description = "Total test count")]
+    pub total: Option<i64>,
+    #[schemars(description = "Passed count")]
+    pub passed: Option<i64>,
+    #[schemars(description = "Failed count")]
+    pub failed: Option<i64>,
+    #[schemars(description = "Skipped count")]
+    pub skipped: Option<i64>,
+    #[schemars(description = "Duration in milliseconds")]
+    pub duration_ms: Option<i64>,
+    #[schemars(description = "Test output (truncated)")]
+    pub output: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct LogBuildRequest {
+    #[schemars(description = "Agent pane_id")]
+    pub pane_id: String,
+    #[schemars(description = "Project name")]
+    pub project: String,
+    #[schemars(description = "Build command")]
+    pub command: Option<String>,
+    #[schemars(description = "Whether build succeeded")]
+    pub success: bool,
+    #[schemars(description = "Duration in milliseconds")]
+    pub duration_ms: Option<i64>,
+    #[schemars(description = "Build output (truncated)")]
+    pub output: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct LogLintRequest {
+    #[schemars(description = "Agent pane_id")]
+    pub pane_id: String,
+    #[schemars(description = "Project name")]
+    pub project: String,
+    #[schemars(description = "Lint command")]
+    pub command: Option<String>,
+    #[schemars(description = "Whether lint passed")]
+    pub success: bool,
+    #[schemars(description = "Total issues")]
+    pub total: Option<i64>,
+    #[schemars(description = "Error count")]
+    pub errors: Option<i64>,
+    #[schemars(description = "Warning count")]
+    pub warnings: Option<i64>,
+    #[schemars(description = "Lint output")]
+    pub output: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct LogDeployRequest {
+    #[schemars(description = "Agent pane_id")]
+    pub pane_id: String,
+    #[schemars(description = "Project name")]
+    pub project: String,
+    #[schemars(description = "Deploy target (production, staging, etc)")]
+    pub target: Option<String>,
+    #[schemars(description = "Whether deploy succeeded")]
+    pub success: bool,
+    #[schemars(description = "Duration in milliseconds")]
+    pub duration_ms: Option<i64>,
+    #[schemars(description = "Deploy output")]
+    pub output: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct QualityReportRequest {
+    #[schemars(description = "Project name")]
+    pub project: String,
+    #[schemars(description = "Number of days (default 7)")]
+    pub days: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct QualityGateRequest {
+    #[schemars(description = "Project name")]
+    pub project: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct RegressionsRequest {
+    #[schemars(description = "Project name")]
+    pub project: String,
+    #[schemars(description = "Number of days to compare (default 14)")]
+    pub days: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ProjectHealthRequest {
+    #[schemars(description = "Project name")]
+    pub project: String,
+}
+
+// ============================================================================
+// DASHBOARD TYPES
+// ============================================================================
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DashOverviewRequest {
+    #[schemars(description = "Filter by project")]
+    pub project: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DashAgentDetailRequest {
+    #[schemars(description = "Agent pane_id")]
+    pub pane_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DashProjectRequest {
+    #[schemars(description = "Project name")]
+    pub project: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DashLeaderboardRequest {
+    #[schemars(description = "Number of days (default 7)")]
+    pub days: Option<i64>,
+    #[schemars(description = "Filter by project")]
+    pub project: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DashTimelineRequest {
+    #[schemars(description = "Filter by project")]
+    pub project: Option<String>,
+    #[schemars(description = "Filter by pane_id")]
+    pub pane_id: Option<String>,
+    #[schemars(description = "Max events (default 50)")]
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DashAlertsRequest {
+    #[schemars(description = "Filter by project")]
+    pub project: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DashDailyDigestRequest {
+    #[schemars(description = "Filter by project")]
+    pub project: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DashExportRequest {
+    #[schemars(description = "Report type: agents, usage, quality")]
+    pub report: String,
+    #[schemars(description = "Filter by project")]
+    pub project: Option<String>,
+    #[schemars(description = "Number of days (default 30)")]
+    pub days: Option<i64>,
+}
+
+// ============================================================================
+// LIFECYCLE TYPES
+// ============================================================================
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct HeartbeatRequest {
+    #[schemars(description = "Agent pane_id")]
+    pub pane_id: String,
+    #[schemars(description = "Current task (optional update)")]
+    pub task: Option<String>,
+    #[schemars(description = "Status: active, idle, busy")]
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SessionStartRequest {
+    #[schemars(description = "Agent pane_id")]
+    pub pane_id: String,
+    #[schemars(description = "Project name")]
+    pub project: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SessionEndRequest {
+    #[schemars(description = "Session ID to end")]
+    pub session_id: String,
+    #[schemars(description = "Summary of what was done")]
+    pub summary: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct LockStealRequest {
+    #[schemars(description = "Agent pane_id stealing the lock")]
+    pub pane_id: String,
+    #[schemars(description = "File path to steal lock for")]
+    pub file_path: String,
+    #[schemars(description = "Justification for stealing")]
+    pub reason: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ConflictScanRequest {
+    #[schemars(description = "Filter by project")]
+    pub project: Option<String>,
+}
