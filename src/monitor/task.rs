@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{debug, error, warn};
 
-use crate::agentos::{AgentOSClient, AgentOSQueueTask};
+use crate::agentos::{AgentOSClient, AgentOSQueueTask, AlertsResponse, AnalyticsDigest};
 use crate::agents::{AgentStatus, MonitoredAgent};
 use crate::app::AgentTree;
 use crate::parsers::ParserRegistry;
@@ -22,6 +22,10 @@ pub struct MonitorUpdate {
     pub agentos_connected: bool,
     /// Flash message for connection state changes
     pub flash: Option<String>,
+    /// 24h analytics digest (fetched on slow cadence)
+    pub digest: Option<AnalyticsDigest>,
+    /// Active alerts (fetched on slow cadence)
+    pub alerts: Option<AlertsResponse>,
 }
 
 /// Background task that monitors tmux panes and AgentOS for AI agents
@@ -38,6 +42,8 @@ pub struct MonitorTask {
     api_fail_count: u32,
     /// Whether API was connected last poll (for detecting transitions)
     was_connected: bool,
+    /// Counter for slow-cadence analytics polling
+    analytics_counter: u32,
 }
 
 impl MonitorTask {
@@ -57,6 +63,7 @@ impl MonitorTask {
             last_active: HashMap::new(),
             api_fail_count: 0,
             was_connected: false,
+            analytics_counter: 0,
         }
     }
 
@@ -82,11 +89,28 @@ impl MonitorTask {
             };
             self.was_connected = connected;
 
+            // Fetch analytics on slow cadence (~5s at 500ms poll = every 10th poll)
+            self.analytics_counter += 1;
+            let mut digest = None;
+            let mut alerts = None;
+            if connected && self.analytics_counter % 10 == 0 {
+                if let Some(ref client) = self.agentos_client {
+                    if let Ok(d) = client.fetch_digest().await {
+                        digest = Some(d);
+                    }
+                    if let Ok(a) = client.fetch_alerts().await {
+                        alerts = Some(a);
+                    }
+                }
+            }
+
             let update = MonitorUpdate {
                 agents: tree,
                 queue_tasks,
                 agentos_connected: connected,
                 flash,
+                digest,
+                alerts,
             };
             if self.tx.send(update).await.is_err() {
                 debug!("Monitor channel closed, stopping");

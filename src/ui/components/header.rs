@@ -70,6 +70,29 @@ impl HeaderWidget {
             ));
         }
 
+        // 24h analytics digest (from API)
+        if state.digest.tool_calls > 0 || state.digest.errors > 0 || state.digest.commits > 0 {
+            spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(
+                format!(
+                    " TC:{} E:{} C:{} ",
+                    state.digest.tool_calls, state.digest.errors, state.digest.commits
+                ),
+                Style::default().fg(Color::Cyan),
+            ));
+        }
+
+        // Alert badge
+        if state.alerts.count > 0 {
+            spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(
+                format!(" ! {} ", state.alerts.count),
+                Style::default()
+                    .fg(Color::Red)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+
         // ACU usage from dashboard
         let cap = &state.dashboard.capacity;
         if cap.acu_total > 0.0 {

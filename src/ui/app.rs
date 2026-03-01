@@ -192,6 +192,12 @@ async fn run_loop(
                 if let Some(msg) = update.flash {
                     state.flash(msg);
                 }
+                if let Some(d) = update.digest {
+                    state.digest = d;
+                }
+                if let Some(a) = update.alerts {
+                    state.alerts = a;
+                }
                 // Ensure selected index is valid
                 if state.selected_index >= state.agents.root_agents.len() {
                     state.selected_index = state.agents.root_agents.len().saturating_sub(1);

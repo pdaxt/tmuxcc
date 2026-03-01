@@ -1,4 +1,4 @@
-use crate::agentos::AgentOSQueueTask;
+use crate::agentos::{AgentOSQueueTask, AlertsResponse, AnalyticsDigest};
 use crate::agents::MonitoredAgent;
 use crate::monitor::SystemStats;
 use crate::state_reader::DashboardData;
@@ -125,6 +125,10 @@ pub struct AppState {
     pub show_dashboard: bool,
     /// Last dashboard refresh tick
     pub dashboard_last_refresh: usize,
+    /// 24h analytics digest from AgentOS API
+    pub digest: AnalyticsDigest,
+    /// Active alerts from AgentOS API
+    pub alerts: AlertsResponse,
 }
 
 impl AppState {
@@ -154,6 +158,8 @@ impl AppState {
             dashboard: DashboardData::default(),
             show_dashboard: true,
             dashboard_last_refresh: 0,
+            digest: AnalyticsDigest::default(),
+            alerts: AlertsResponse::default(),
         }
     }
 

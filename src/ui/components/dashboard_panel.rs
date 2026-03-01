@@ -1,5 +1,6 @@
 //! Dashboard panel — shows capacity, sprint, board, MCPs, activity, session info.
 
+use crate::agentos::{AlertsResponse, AnalyticsDigest};
 use crate::app::AppState;
 use crate::state_reader::DashboardData;
 use ratatui::{
@@ -16,32 +17,40 @@ impl DashboardWidget {
     pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
         let dash = &state.dashboard;
 
-        // Split into 3 columns
+        // Split into 4 columns
         let cols = ratatui::layout::Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(33),
-                Constraint::Percentage(34),
-                Constraint::Percentage(33),
+                Constraint::Percentage(25),
+                Constraint::Percentage(25),
+                Constraint::Percentage(25),
+                Constraint::Percentage(25),
             ])
             .split(area);
 
-        // Left column: Capacity + Auto-cycle
+        // Col 1: Capacity + Auto-cycle
         Self::render_capacity(frame, cols[0], dash);
-        // Middle: Sprint + Board
+        // Col 2: Sprint + Board
         let mid = ratatui::layout::Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
             .split(cols[1]);
         Self::render_sprint(frame, mid[0], dash);
         Self::render_board(frame, mid[1], dash);
-        // Right: MCPs + Activity
+        // Col 3: MCPs + Activity
         let right = ratatui::layout::Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
             .split(cols[2]);
         Self::render_mcps(frame, right[0], dash);
         Self::render_activity(frame, right[1], dash);
+        // Col 4: Analytics (digest + alerts from API)
+        let analytics = ratatui::layout::Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(cols[3]);
+        Self::render_digest(frame, analytics[0], &state.digest);
+        Self::render_alerts(frame, analytics[1], &state.alerts);
     }
 
     fn gauge_spans(used: f64, total: f64, width: usize) -> Vec<Span<'static>> {
@@ -320,6 +329,122 @@ impl DashboardWidget {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Color::Blue));
+
+        frame.render_widget(Paragraph::new(lines).block(block), area);
+    }
+
+    fn render_digest(frame: &mut Frame, area: Rect, digest: &AnalyticsDigest) {
+        let lines = vec![
+            Line::from(vec![
+                Span::raw("Tool Calls: "),
+                Span::styled(
+                    digest.tool_calls.to_string(),
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  Errors: "),
+                Span::styled(
+                    format!("{} ({})", digest.errors, digest.error_rate),
+                    Style::default().fg(if digest.errors > 5 {
+                        Color::Red
+                    } else if digest.errors > 0 {
+                        Color::Yellow
+                    } else {
+                        Color::Green
+                    }),
+                ),
+            ]),
+            Line::from(vec![
+                Span::raw("Commits: "),
+                Span::styled(
+                    digest.commits.to_string(),
+                    Style::default().fg(Color::Green),
+                ),
+                Span::raw("  Files: "),
+                Span::styled(
+                    digest.files_touched.to_string(),
+                    Style::default().fg(Color::White),
+                ),
+            ]),
+            Line::from(vec![
+                Span::raw("Agents: "),
+                Span::styled(
+                    digest.agents_active.to_string(),
+                    Style::default().fg(Color::Cyan),
+                ),
+                Span::raw("  Tasks: "),
+                Span::styled(
+                    digest.tasks_completed.to_string(),
+                    Style::default().fg(Color::Green),
+                ),
+            ]),
+        ];
+
+        let block = Block::default()
+            .title(" 24h Digest ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::Cyan));
+
+        frame.render_widget(Paragraph::new(lines).block(block), area);
+    }
+
+    fn render_alerts(frame: &mut Frame, area: Rect, alerts: &AlertsResponse) {
+        let lines: Vec<Line> = if alerts.alerts.is_empty() {
+            vec![Line::from(Span::styled(
+                "No alerts",
+                Style::default().fg(Color::Green),
+            ))]
+        } else {
+            alerts
+                .alerts
+                .iter()
+                .take(5)
+                .map(|a| {
+                    let (icon, color) = match a.level.as_str() {
+                        "critical" => ("!", Color::Red),
+                        "warning" => ("~", Color::Yellow),
+                        _ => ("i", Color::Cyan),
+                    };
+                    let detail = a
+                        .pane_id
+                        .as_deref()
+                        .or(a.project.as_deref())
+                        .or(a.error_rate.as_deref())
+                        .unwrap_or("");
+                    Line::from(vec![
+                        Span::styled(
+                            format!(" {} ", icon),
+                            Style::default().fg(color).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            format!("{:<8}", a.level.to_uppercase()),
+                            Style::default().fg(color),
+                        ),
+                        Span::raw(format!("{:<16}", a.alert_type)),
+                        Span::styled(detail.to_string(), Style::default().fg(Color::DarkGray)),
+                    ])
+                })
+                .collect()
+        };
+
+        let title = if alerts.count > 0 {
+            format!(" Alerts ({}) ", alerts.count)
+        } else {
+            " Alerts ".to_string()
+        };
+        let border_color = if alerts.alerts.iter().any(|a| a.level == "critical") {
+            Color::Red
+        } else if alerts.count > 0 {
+            Color::Yellow
+        } else {
+            Color::Green
+        };
+
+        let block = Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(border_color));
 
         frame.render_widget(Paragraph::new(lines).block(block), area);
     }
