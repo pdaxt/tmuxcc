@@ -17,6 +17,9 @@ pub struct RuntimeConfig {
     /// Theme definitions per pane (auto-generated if missing)
     #[serde(default)]
     pub themes: Vec<ThemeEntry>,
+    /// Directories to scan for projects (default: ["~/Projects"])
+    #[serde(default)]
+    pub scan_dirs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,6 +63,7 @@ impl Default for RuntimeConfig {
             session_name: "agentos".into(),
             web_port: 3100,
             themes: Vec::new(),
+            scan_dirs: Vec::new(),
         }
     }
 }
@@ -244,6 +248,10 @@ pub fn projects_dir() -> PathBuf {
 pub fn resolve_project_path(project: &str) -> String {
     if project.starts_with('/') {
         return project.to_string();
+    }
+    // Consult project registry first (exact name match)
+    if let Some(info) = crate::scanner::project_by_name(project) {
+        return info.path;
     }
     let p = projects_dir().join(project);
     if p.exists() {

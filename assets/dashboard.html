@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AgentOS</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%230d1117'/><text x='16' y='23' text-anchor='middle' font-size='20' fill='%2358a6ff'>A</text></svg>">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{--bg:#0d1117;--surface:#161b22;--border:#30363d;--text:#c9d1d9;--muted:#8b949e;--dim:#484f58;
@@ -18,9 +19,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .live-dot{width:7px;height:7px;background:var(--green);border-radius:50%;display:inline-block;animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 .live-label{font-size:11px;color:var(--green);font-weight:600;letter-spacing:.5px}
+.last-updated{font-size:10px;color:var(--dim);font-family:monospace}
 select{background:#21262d;color:var(--text);border:1px solid var(--border);padding:4px 8px;border-radius:6px;font-size:12px;cursor:pointer}
 .status-badge{font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;letter-spacing:.5px}
 .status-ok{background:#3fb95022;color:var(--green)}
+.status-idle{background:#21262d;color:var(--dim)}
 .status-warn{background:#d2992222;color:var(--yellow)}
 .status-alert{background:#f8514933;color:var(--red);animation:pulse 1.5s infinite}
 
@@ -54,7 +57,7 @@ select{background:#21262d;color:var(--text);border:1px solid var(--border);paddi
 .pane-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;cursor:pointer;transition:border-color .2s,transform .1s}
 .pane-card:hover{border-color:var(--blue);transform:translateY(-1px)}
 .pane-card.active{border-left:3px solid}
-.pane-card.idle{opacity:.5}
+.pane-card.idle{opacity:.45;padding:8px 12px}
 .pane-card.has-error{border-color:var(--red);box-shadow:0 0 8px #f8514933}
 .pane-card.is-done{border-color:var(--green);box-shadow:0 0 8px #3fb95033}
 .pane-card.is-stuck{border-color:var(--yellow);box-shadow:0 0 8px #d2992233}
@@ -173,9 +176,10 @@ canvas{width:100%;display:block}
 <div class="header">
   <h1>AgentOS <span>Runtime</span></h1>
   <div class="controls">
-    <span id="status-indicator" class="status-badge status-ok">ALL CLEAR</span>
+    <span id="status-indicator" class="status-badge status-idle">IDLE</span>
     <span class="live-dot"></span>
     <span class="live-label">LIVE</span>
+    <span class="last-updated" id="last-updated"></span>
     <select id="space-select" onchange="refresh()"></select>
   </div>
 </div>
@@ -258,18 +262,40 @@ async function fetchJSON(url){
 }
 
 function gc(pct){return pct>80?'c-red':pct>50?'c-yellow':'c-green'}
-function fmtMins(m){if(!m&&m!==0)return'';if(m<60)return m+'m';return Math.floor(m/60)+'h'+m%60+'m';}
+function fmtMins(m){if(!m&&m!==0)return'';if(m<60)return m+'m';return Math.floor(m/60)+'h'+(m%60?m%60+'m':'');}
+
+function updateTimestamp(){
+  const now=new Date();
+  const h=String(now.getHours()).padStart(2,'0');
+  const m=String(now.getMinutes()).padStart(2,'0');
+  const s=String(now.getSeconds()).padStart(2,'0');
+  document.getElementById('last-updated').textContent=h+':'+m+':'+s;
+}
 
 // === Monitor (single-call data source) ===
 async function loadMonitor(){
   monitorData=await fetchJSON('/api/monitor');
   if(!monitorData)return;
 
-  // Update status indicator
+  // Update status indicator — IDLE when nothing running, ALL CLEAR when agents active and healthy
   const ind=document.getElementById('status-indicator');
   const s=monitorData.status;
-  ind.textContent=s;
-  ind.className='status-badge '+(s==='ATTENTION NEEDED'?'status-alert':s==='OK'?'status-warn':'status-ok');
+  const active=monitorData.summary?monitorData.summary.active:0;
+  const hasAlerts=monitorData.alerts&&monitorData.alerts.length>0;
+
+  if(s==='ATTENTION NEEDED'){
+    ind.textContent='ATTENTION NEEDED';
+    ind.className='status-badge status-alert';
+  } else if(active>0&&!hasAlerts){
+    ind.textContent='ALL CLEAR';
+    ind.className='status-badge status-ok';
+  } else if(active>0){
+    ind.textContent='OK';
+    ind.className='status-badge status-warn';
+  } else {
+    ind.textContent='IDLE';
+    ind.className='status-badge status-idle';
+  }
 
   // Render alerts
   const alertEl=document.getElementById('alerts');
@@ -282,6 +308,8 @@ async function loadMonitor(){
   }else{
     alertEl.innerHTML='';
   }
+
+  updateTimestamp();
 }
 
 // === Spaces ===
@@ -299,8 +327,6 @@ async function renderGauges(){
   if(!d)return;
   const sm=monitorData?monitorData.summary:{active:0};
   const q=monitorData?monitorData.queue:{pending:0,running:0};
-  const bn=d.bottleneck==='review'?'REVIEW':d.bottleneck==='compute'?'COMPUTE':'BALANCED';
-  const bnC=d.bottleneck==='review'?'c-red':d.bottleneck==='compute'?'c-yellow':'c-green';
   const acuC=gc(d.acu_pct);const revC=gc(d.reviews_pct);
   const total=sm.total||9;
   document.getElementById('gauges').innerHTML=`
@@ -325,29 +351,43 @@ function renderPanesFromMonitor(){
   let html='';
   for(const p of monitorData.panes){
     const h=p.health;
+    const isIdle=h==='idle';
     const isActive=h==='active'||h==='done'||h==='error'||h==='stuck';
+    const hasProject=p.project&&p.project!=='--';
     let cls=isActive?'active':'idle';
     if(h==='error')cls+=' has-error';
     else if(h==='done')cls+=' is-done';
     else if(h==='stuck')cls+=' is-stuck';
     const sc=h==='active'?'s-active':h==='done'?'s-done':h==='error'?'s-error':h==='stuck'?'s-stuck':'s-idle';
     const color=p.theme_color||getThemeColor(p.pane);
-    html+=`<div class="pane-card ${cls}" style="border-left-color:${color}" onclick="openPaneWatch(${p.pane})">
-      <div class="pane-top">
-        <span class="pane-num" style="background:${color}">${p.pane}</span>
-        <span class="pane-status ${sc}">${h}</span>
-      </div>
-      <div class="pane-project">${p.project||'--'}</div>
-      <div class="pane-task">${p.task||'No task assigned'}</div>
-      <div class="pane-meta">
-        ${p.role&&p.role!=='--'?`<span class="badge badge-role">${p.role}</span>`:''}
-        ${p.pty?'<span class="badge badge-pty">PTY</span>':''}
-        ${p.lines>0?`<span class="badge badge-lines">${p.lines}L</span>`:''}
-        ${p.runtime_mins?`<span class="badge badge-runtime">${fmtMins(p.runtime_mins)}</span>`:''}
-        ${p.error?'<span class="badge badge-errors">ERR</span>':''}
-        ${h==='done'?'<span class="badge badge-done">DONE</span>':''}
-      </div>
-    </div>`;
+
+    if(isIdle&&!hasProject){
+      // Compact idle pane — no stale data
+      html+=`<div class="pane-card idle" style="border-left-color:${color}" onclick="openPaneWatch(${p.pane})">
+        <div class="pane-top" style="margin-bottom:0">
+          <span class="pane-num" style="background:${color}">${p.pane}</span>
+          <span class="pane-status s-idle">available</span>
+        </div>
+      </div>`;
+    } else {
+      // Active or has-data pane
+      html+=`<div class="pane-card ${cls}" style="border-left-color:${color}" onclick="openPaneWatch(${p.pane})">
+        <div class="pane-top">
+          <span class="pane-num" style="background:${color}">${p.pane}</span>
+          <span class="pane-status ${sc}">${h}</span>
+        </div>
+        <div class="pane-project">${p.project||'--'}</div>
+        <div class="pane-task">${p.task||'No task assigned'}</div>
+        <div class="pane-meta">
+          ${p.role&&p.role!=='--'?`<span class="badge badge-role">${p.role}</span>`:''}
+          ${p.pty?'<span class="badge badge-pty">PTY</span>':''}
+          ${p.lines>0?`<span class="badge badge-lines">${p.lines}L</span>`:''}
+          ${p.runtime_mins?`<span class="badge badge-runtime">${fmtMins(p.runtime_mins)}</span>`:''}
+          ${p.error?'<span class="badge badge-errors">ERR</span>':''}
+          ${h==='done'?'<span class="badge badge-done">DONE</span>':''}
+        </div>
+      </div>`;
+    }
   }
   el.innerHTML=html;
 }
@@ -361,9 +401,9 @@ async function openPaneWatch(paneNum){
   if(!d)return;
   const color=d.theme_color||getThemeColor(paneNum);
   document.getElementById('modal-title').innerHTML=
-    `<span class="pane-num" style="background:${color}">${d.pane}</span> ${d.theme} &mdash; ${d.project||'idle'}`;
+    `<span class="pane-num" style="background:${color}">${d.pane}</span> ${d.theme} &mdash; ${d.project&&d.project!=='--'?d.project:'idle'}`;
   document.getElementById('modal-meta').innerHTML=`
-    <div><dt>Role</dt><dd>${d.role||'--'}</dd></div>
+    <div><dt>Role</dt><dd>${d.role&&d.role!=='--'?d.role:'--'}</dd></div>
     <div><dt>Status</dt><dd>${d.status||'idle'}</dd></div>
     <div><dt>Phase</dt><dd>${d.phase||'--'}</dd></div>
     <div><dt>PTY</dt><dd>${d.pty_running?'Running':'Off'}</dd></div>
@@ -416,36 +456,34 @@ async function renderRoles(){
   const d=await fetchJSON(`/api/capacity/dashboard?space=${currentSpace}`);
   if(!d||!d.roles)return;
   const el=document.getElementById('roles');
+  const entries=Object.entries(d.roles);
+  const anyActive=entries.some(([,v])=>v.pct>0);
+  if(!anyActive){
+    el.innerHTML='<div class="no-data" style="padding:12px">No active agents</div>';
+    return;
+  }
   let html='';
-  for(const[k,v]of Object.entries(d.roles)){
+  for(const[k,v]of entries){
     html+=`<div class="role-bar"><div class="role-label"><span>${v.name}</span><span>${v.pct}%</span></div>
       <div class="role-track"><div class="role-fill" style="width:${v.pct}%"></div></div></div>`;
   }
-  if(!html)html='<div class="no-data">No roles configured</div>';
   el.innerHTML=html;
 }
 
-// === Logs (uses monitor data) ===
+// === Logs (uses monitor data + full log) ===
 function renderLogsFromMonitor(){
-  if(!monitorData||!monitorData.recent)return;
   const el=document.getElementById('logs');
-  let html='';
-  for(const l of monitorData.recent){
-    html+=`<div class="log-entry"><span class="log-ts">${l.time||''}</span><span class="log-pane">P${l.pane}</span><span class="log-msg">${l.summary||l.event}</span></div>`;
-  }
-  // Also fetch full log for sidebar
+  // Fetch full log for sidebar
   fetchJSON('/api/logs').then(logs=>{
-    if(!logs)return;
-    let fullHtml='';
+    if(!logs||!logs.length){el.innerHTML='<div class="no-data">No activity yet</div>';return;}
+    let html='';
     for(const l of logs.slice(0,20)){
       const ts=l.ts&&l.ts.length>=16?l.ts.slice(11,16):l.ts||'';
-      fullHtml+=`<div class="log-entry"><span class="log-ts">${ts}</span><span class="log-pane">P${l.pane}</span><span class="log-msg">${l.summary||l.event}</span></div>`;
+      const fullMsg=l.summary||l.event||'';
+      html+=`<div class="log-entry" title="${fullMsg.replace(/"/g,'&quot;')}"><span class="log-ts">${ts}</span><span class="log-pane">P${l.pane}</span><span class="log-msg">${fullMsg}</span></div>`;
     }
-    if(!fullHtml)fullHtml='<div class="no-data">No activity yet</div>';
-    el.innerHTML=fullHtml;
+    el.innerHTML=html;
   });
-  if(!html)html='<div class="no-data">No activity yet</div>';
-  el.innerHTML=html;
 }
 
 // === Queue Form ===
@@ -481,21 +519,23 @@ async function renderQueue(){
   sumEl.textContent=`${s.pending} pending \u00b7 ${s.running} running \u00b7 ${s.done} done${s.failed?' \u00b7 '+s.failed+' failed':''}`;
   const el=document.getElementById('queue-table');
   const active=d.tasks.filter(t=>t.status!=='done');
-  const done=d.tasks.filter(t=>t.status==='done').slice(-5).reverse();
+  const failed=d.tasks.filter(t=>t.status==='failed');
+  const done=d.tasks.filter(t=>t.status==='done').slice(-3).reverse();
   const show=[...active,...done];
-  if(!show.length){el.innerHTML='<div class="q-empty">Queue empty</div>';return;}
+  if(!show.length){el.innerHTML='<div class="q-empty">Queue empty &mdash; use + Add or MCP os_queue_add</div>';return;}
   let html='<table class="q-table"><thead><tr><th>ID</th><th>P</th><th>Status</th><th>Project</th><th>Task</th><th>Role</th><th>Pane</th><th></th></tr></thead><tbody>';
   for(const t of show){
     const sc=t.status==='pending'?'q-pending':t.status==='running'?'q-running':t.status==='done'?'q-done':t.status==='failed'?'q-failed':'q-blocked';
     const pc='q-p'+(t.priority||3);
     const pane=t.pane?'P'+t.pane:'\u2014';
     const proj=(t.project||'').split('/').pop();
+    const fullTask=t.task||'';
     let actions='';
     if(t.status==='failed'||t.status==='done')actions+=`<button onclick="retryTask('${t.id}')" style="background:var(--yellow);color:#000;border:none;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700;cursor:pointer;margin-right:3px">RETRY</button>`;
     if(t.status!=='running')actions+=`<button onclick="deleteTask('${t.id}')" style="background:var(--red);color:#fff;border:none;padding:1px 6px;border-radius:3px;font-size:9px;font-weight:700;cursor:pointer">DEL</button>`;
     html+=`<tr><td class="q-id">${t.id}</td><td><span class="q-priority ${pc}">${t.priority}</span></td>
       <td><span class="q-status ${sc}">${t.status}</span></td>
-      <td>${proj}</td><td>${(t.task||'').slice(0,40)}</td><td><span class="badge badge-role">${t.role||'dev'}</span></td>
+      <td>${proj}</td><td title="${fullTask.replace(/"/g,'&quot;')}">${fullTask.slice(0,40)}${fullTask.length>40?'...':''}</td><td><span class="badge badge-role">${t.role||'dev'}</span></td>
       <td>${pane}</td><td>${actions}</td></tr>`;
   }
   html+='</tbody></table>';
@@ -505,9 +545,14 @@ async function renderQueue(){
 // === Board ===
 async function renderBoard(){
   const d=await fetchJSON(`/api/board?space=${currentSpace}`);
-  if(!d){document.getElementById('kanban').innerHTML='<div class="no-data">Select a space</div>';return;}
   const order=['backlog','todo','in_progress','review','done'];
   const labels={backlog:'Backlog',todo:'To Do',in_progress:'In Progress',review:'Review',done:'Done'};
+  // Check if board has any data
+  const totalCards=d?order.reduce((sum,col)=>(d[col]?sum+d[col].length:sum),0):0;
+  if(!d||totalCards===0){
+    document.getElementById('kanban').innerHTML='<div class="no-data" style="width:100%">No issues tracked &mdash; create issues via MCP issue_create</div>';
+    return;
+  }
   let html='';
   for(const col of order){
     const cards=d[col]||[];
@@ -518,7 +563,7 @@ async function renderBoard(){
       html+=`<div class="k-card"><div class="k-id">${c.id}</div><div class="k-title">${(c.title||'').slice(0,50)}</div>
         <div class="k-tags"><span class="tag tag-${c.priority}">${(c.priority||'').toUpperCase()}</span>${acu}${role}</div></div>`;
     }
-    if(!cards.length)html+='<div class="no-data">Empty</div>';
+    if(!cards.length)html+='<div class="no-data" style="padding:12px">Empty</div>';
     html+='</div></div>';
   }
   document.getElementById('kanban').innerHTML=html;

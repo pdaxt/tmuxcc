@@ -144,14 +144,15 @@ impl AgentHandle {
         self.last_lines(n).join("\n")
     }
 
-    /// Check if the child process is still running
+    /// Check if the child process is still running.
+    /// Sets exit_status to -1 on first detection of reader EOF (compare-and-set to avoid races).
     pub fn is_running(&self) -> bool {
         let reader_done = self.reader_handle.as_ref().map_or(true, |h| h.is_finished());
         if reader_done {
-            // Reader finished = process exited, capture sentinel exit status
+            // Reader finished = process exited — set sentinel only if not already set
             if let Ok(mut status) = self.exit_status.lock() {
                 if status.is_none() {
-                    *status = Some(-1); // Unknown exit code (reader EOF)
+                    *status = Some(-1);
                 }
             }
             return false;
@@ -164,20 +165,25 @@ impl AgentHandle {
         self.exit_status.lock().ok().and_then(|s| *s)
     }
 
-    /// Kill the child process (non-blocking — signals then force-kills immediately)
+    /// Kill the child process and join the reader thread.
     pub fn kill(&mut self) -> anyhow::Result<()> {
         // Try graceful signals first (non-blocking)
         let _ = self.send_line("/exit");
         let _ = self.send_ctrl_c();
 
-        // Force kill immediately — don't block the mutex
+        // Force kill immediately
         self.child.kill()?;
+
+        // Join reader thread so it doesn't outlive the killed process
+        if let Some(handle) = self.reader_handle.take() {
+            let _ = handle.join();
+        }
 
         Ok(())
     }
 
     /// Total line count captured
     pub fn line_count(&self) -> usize {
-        self.output_lines.lock().map(|l| l.len()).unwrap_or(0)
+        self.output_lines.lock().ok().map(|l| l.len()).unwrap_or(0)
     }
 }

@@ -1,3 +1,4 @@
+pub mod health;
 pub mod reaper;
 pub mod retention;
 
@@ -31,6 +32,28 @@ pub async fn start_background_tasks() {
             if let Err(e) = retention::prune() {
                 tracing::warn!("Retention error: {e}");
             }
+        }
+    });
+
+    // Project scanner: discover repos every 5 minutes
+    tokio::spawn(async {
+        // Initial scan at startup
+        let reg = crate::scanner::scan_all();
+        tracing::info!("Project scanner: discovered {} repos", reg.projects.len());
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+            let reg = crate::scanner::scan_all();
+            tracing::info!("Project scanner: {} repos", reg.projects.len());
+        }
+    });
+
+    // Health monitor: run tests/builds every 15 minutes for changed projects
+    tokio::spawn(async {
+        // Delay to let scanner populate registry first
+        tokio::time::sleep(std::time::Duration::from_secs(120)).await;
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(15 * 60)).await;
+            health::health_cycle().await;
         }
     });
 }

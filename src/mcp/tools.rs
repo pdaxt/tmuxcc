@@ -102,10 +102,19 @@ pub async fn spawn(app: &App, req: SpawnRequest) -> String {
         pty.spawn(pane_num, "claude", &claude_args, &spawn_cwd, env_vars)
     };
 
-    let pty_status = match pty_result {
+    let pty_status = match &pty_result {
         Ok(()) => "pty_spawned".to_string(),
         Err(e) => format!("pty_error: {}", e),
     };
+
+    // If PTY spawn failed, clean up and return error
+    if pty_result.is_err() {
+        // Clean up worktree if we created one
+        if let Some(ref ws) = ws_path {
+            let _ = workspace::remove_worktree(&project_path, ws);
+        }
+        return format!("{{\"error\": \"PTY spawn failed: {}\"}}", pty_status);
+    }
 
     // Update state
     let pane_state = PaneState {
@@ -2243,10 +2252,22 @@ pub async fn watch(app: &App, req: WatchRequest) -> String {
         return serde_json::json!({
             "pane": pane_num,
             "theme": config::theme_name(pane_num),
+            "theme_color": config::theme_fg(pane_num),
             "status": pd.status,
             "project": pd.project,
+            "role": pd.role,
             "task": pd.task,
+            "branch": pd.branch_name,
+            "pty_running": false,
             "pty_active": false,
+            "phase": if pd.status == "idle" { "idle" } else { "unknown" },
+            "line_count": 0,
+            "runtime_mins": serde_json::Value::Null,
+            "done": false,
+            "error_count": 0,
+            "warning_count": 0,
+            "errors": [],
+            "warnings": [],
             "output": format!("[No PTY] Pane {} is {}", pane_num, pd.status),
         }).to_string();
     }

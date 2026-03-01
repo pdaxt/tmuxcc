@@ -19,6 +19,7 @@ mod analytics;
 mod quality;
 mod dashboard;
 mod engine;
+mod scanner;
 
 use std::sync::Arc;
 use clap::{Parser, Subcommand};

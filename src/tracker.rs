@@ -423,11 +423,8 @@ pub fn timeline_generate(space: &str, milestone_filter: &str) -> Value {
         };
         let id_str = issue["id"].as_str().unwrap_or("x").to_lowercase().replace('-', "");
         let title: String = issue["title"].as_str().unwrap_or("").chars().take(40).collect();
-        let est = issue.get("estimate").and_then(|v| v.as_str()).unwrap_or("1d");
-        let duration = if est.ends_with("pts") { format!("{}d", est.trim_end_matches("pts")) }
-            else if est.ends_with('h') { "1d".into() }
-            else if est.ends_with('d') { est.into() }
-            else { "1d".into() };
+        let est_acu = issue.get("estimated_acu").and_then(|v| v.as_f64()).unwrap_or(1.0);
+        let duration = format!("{}d", (est_acu.ceil() as u32).max(1));
 
         sections.entry(ms).or_default().push(json!({
             "id": id_str, "title": title, "status": gantt_status, "duration": duration,

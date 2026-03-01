@@ -299,13 +299,13 @@ pub fn requeue_failed(task_id: &str) -> Result<bool> {
     }
 
     if requeued {
-        // Also unblock cascade-failed dependents
+        // Unblock cascade-failed dependents — set to Pending so they re-enter the queue
         let tid = task_id.to_string();
         for task in &mut queue.tasks {
             if task.status == QueueStatus::Failed {
                 if let Some(err) = &task.last_error {
                     if err.contains(&format!("cascade: dependency {} failed", tid)) {
-                        task.status = QueueStatus::Blocked;
+                        task.status = QueueStatus::Pending;
                         task.completed_at = None;
                         task.result = None;
                         task.last_error = None;

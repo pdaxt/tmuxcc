@@ -690,7 +690,9 @@ fn render_pane_table(f: &mut Frame, area: Rect, data: &DashboardData) {
 }
 
 fn render_pty_output(f: &mut Frame, area: Rect, data: &DashboardData) {
-    let sel = &data.panes[(data.selected - 1) as usize];
+    let idx = (data.selected - 1) as usize;
+    if idx >= data.panes.len() { return; }
+    let sel = &data.panes[idx];
     let branch_display = sel.branch.as_deref().unwrap_or("");
     let title = if !branch_display.is_empty() {
         format!(" P{} {} — {} [{}] ", sel.pane, sel.theme,
