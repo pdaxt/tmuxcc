@@ -218,48 +218,6 @@ impl PanePreviewWidget {
         }
     }
 
-    pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
-        let agent = state.selected_agent();
-
-        let (title, content) = if let Some(agent) = agent {
-            let title = format!(" Preview: {} ({}) ", agent.target, agent.agent_type);
-
-            // Show approval details if awaiting
-            let content = if let AgentStatus::AwaitingApproval {
-                approval_type,
-                details,
-            } = &agent.status
-            {
-                format!(
-                    "⚠ {} wants: {}\n\nDetails: {}\n\nPress [Y] to approve or [N] to reject",
-                    agent.agent_type, approval_type, details
-                )
-            } else {
-                // Show last portion of pane content
-                let lines: Vec<&str> = agent.last_content.lines().collect();
-                let start = lines.len().saturating_sub(20);
-                lines[start..].join("\n")
-            };
-
-            (title, content)
-        } else {
-            (" Preview ".to_string(), "No agent selected".to_string())
-        };
-
-        let block = Block::default()
-            .title(title)
-            .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(Color::Gray));
-
-        let paragraph = Paragraph::new(content)
-            .block(block)
-            .wrap(Wrap { trim: false })
-            .style(Style::default().fg(Color::White));
-
-        frame.render_widget(paragraph, area);
-    }
-
     /// Renders a detailed preview with syntax highlighting for diffs
     pub fn render_detailed(frame: &mut Frame, area: Rect, state: &AppState) {
         let agent = state.selected_agent();

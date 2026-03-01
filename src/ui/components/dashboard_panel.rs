@@ -17,14 +17,15 @@ impl DashboardWidget {
     pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
         let dash = &state.dashboard;
 
-        // Split into 4 columns
+        // Split into 5 columns
         let cols = ratatui::layout::Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(25),
-                Constraint::Percentage(25),
-                Constraint::Percentage(25),
-                Constraint::Percentage(25),
+                Constraint::Percentage(20),
+                Constraint::Percentage(20),
+                Constraint::Percentage(20),
+                Constraint::Percentage(20),
+                Constraint::Percentage(20),
             ])
             .split(area);
 
@@ -44,11 +45,18 @@ impl DashboardWidget {
             .split(cols[2]);
         Self::render_mcps(frame, right[0], dash);
         Self::render_activity(frame, right[1], dash);
-        // Col 4: Analytics (digest + alerts from API)
-        let analytics = ratatui::layout::Layout::default()
+        // Col 4: Session + Multi-Agent
+        let col4 = ratatui::layout::Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
             .split(cols[3]);
+        Self::render_session(frame, col4[0], dash);
+        Self::render_multi_agent(frame, col4[1], dash);
+        // Col 5: Analytics (digest + alerts from API)
+        let analytics = ratatui::layout::Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(cols[4]);
         Self::render_digest(frame, analytics[0], &state.digest);
         Self::render_alerts(frame, analytics[1], &state.alerts);
     }
@@ -449,6 +457,133 @@ impl DashboardWidget {
         frame.render_widget(Paragraph::new(lines).block(block), area);
     }
 
+    fn render_session(frame: &mut Frame, area: Rect, dash: &DashboardData) {
+        let session = &dash.session;
+        let mut lines = vec![];
+
+        if !session.current_task.is_empty() {
+            lines.push(Line::from(vec![
+                Span::styled("Task: ", Style::default().fg(Color::Gray)),
+                Span::styled(
+                    truncate_dash(&session.current_task, 25),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]));
+        }
+
+        if let Some(ref blocked) = session.blocked_on {
+            lines.push(Line::from(vec![
+                Span::styled("! ", Style::default().fg(Color::Red)),
+                Span::styled(
+                    truncate_dash(blocked, 25),
+                    Style::default().fg(Color::Red),
+                ),
+            ]));
+        }
+
+        let done = session.completed.len();
+        let next = session.next_steps.len();
+        if done > 0 || next > 0 {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("\u{2713}{}", done),
+                    Style::default().fg(Color::Green),
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    format!("\u{2192}{}", next),
+                    Style::default().fg(Color::Yellow),
+                ),
+            ]));
+        }
+
+        // Show first next step if available
+        if let Some(step) = session.next_steps.first() {
+            lines.push(Line::from(vec![
+                Span::styled("  \u{2192} ", Style::default().fg(Color::Yellow)),
+                Span::styled(
+                    truncate_dash(step, 22),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ]));
+        }
+
+        if lines.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "No session data",
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
+
+        let block = Block::default()
+            .title(" Session ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::Blue));
+
+        frame.render_widget(Paragraph::new(lines).block(block), area);
+    }
+
+    fn render_multi_agent(frame: &mut Frame, area: Rect, dash: &DashboardData) {
+        let agents = &dash.multi_agent;
+        let max_lines = (area.height as usize).saturating_sub(2);
+
+        let lines: Vec<Line> = if agents.is_empty() {
+            vec![Line::from(Span::styled(
+                "No agents registered",
+                Style::default().fg(Color::DarkGray),
+            ))]
+        } else {
+            agents
+                .iter()
+                .take(max_lines)
+                .map(|a| {
+                    // Extract pane number from pane_id like "claude6:1.1"
+                    let pane_label = a
+                        .pane_id
+                        .rsplit(':')
+                        .next()
+                        .unwrap_or(&a.pane_id);
+                    let ts = if a.last_update.len() > 16 {
+                        &a.last_update[11..16]
+                    } else if a.last_update.len() >= 5 {
+                        &a.last_update[a.last_update.len() - 5..]
+                    } else {
+                        &a.last_update
+                    };
+
+                    Line::from(vec![
+                        Span::styled(
+                            format!("{:<5}", pane_label),
+                            Style::default().fg(Color::Cyan),
+                        ),
+                        Span::styled(
+                            format!("{:<10}", truncate_dash(&a.project, 10)),
+                            Style::default().fg(Color::White),
+                        ),
+                        Span::styled(
+                            truncate_dash(&a.task, 15),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                        Span::raw(" "),
+                        Span::styled(ts.to_string(), Style::default().fg(Color::DarkGray)),
+                    ])
+                })
+                .collect()
+        };
+
+        let title = format!(" Agents ({}) ", agents.len());
+        let block = Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::Blue));
+
+        frame.render_widget(Paragraph::new(lines).block(block), area);
+    }
+
     fn render_activity(frame: &mut Frame, area: Rect, dash: &DashboardData) {
         let theme_colors: [(u8, Color); 9] = [
             (1, Color::Cyan),
@@ -511,5 +646,13 @@ impl DashboardWidget {
             .border_style(Style::default().fg(Color::Blue));
 
         frame.render_widget(Paragraph::new(lines).block(block), area);
+    }
+}
+
+fn truncate_dash(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        format!("{}…", s.chars().take(max.saturating_sub(1)).collect::<String>())
     }
 }

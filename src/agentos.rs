@@ -141,13 +141,6 @@ impl AgentOSClient {
         Ok(resp)
     }
 
-    /// Fetch pane output (last N lines)
-    pub async fn fetch_output(&self, pane_id: u8) -> anyhow::Result<String> {
-        let url = format!("{}/api/pane/{}/output", self.api_url, pane_id);
-        let resp = self.client.get(&url).send().await?.text().await?;
-        Ok(resp)
-    }
-
     /// Convert AgentOS pane to MonitoredAgent
     pub fn pane_to_agent(pane: &AgentOSPane) -> MonitoredAgent {
         let status = match pane.status.as_str() {

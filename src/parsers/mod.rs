@@ -86,10 +86,6 @@ impl ParserRegistry {
             .map(|p| p.as_ref())
     }
 
-    /// Returns all registered parsers
-    pub fn all_parsers(&self) -> impl Iterator<Item = &dyn AgentParser> {
-        self.parsers.iter().map(|p| p.as_ref())
-    }
 }
 
 impl Default for ParserRegistry {

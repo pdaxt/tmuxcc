@@ -446,6 +446,55 @@ pub fn load_session() -> SessionData {
 }
 
 // =============================================================================
+// Multi-Agent Coordination
+// =============================================================================
+
+#[derive(Debug, Clone)]
+pub struct MultiAgentEntry {
+    pub pane_id: String,
+    pub project: String,
+    pub task: String,
+    pub last_update: String,
+}
+
+pub fn load_multi_agent() -> Vec<MultiAgentEntry> {
+    let path = home_dir()
+        .join(".claude")
+        .join("multi_agent")
+        .join("agents.json");
+    let data = match read_json(&path) {
+        Some(d) => d,
+        None => return Vec::new(),
+    };
+
+    let obj = match data.as_object() {
+        Some(o) => o,
+        None => return Vec::new(),
+    };
+
+    obj.iter()
+        .map(|(pane_id, info)| MultiAgentEntry {
+            pane_id: pane_id.clone(),
+            project: info
+                .get("project")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            task: info
+                .get("task")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            last_update: info
+                .get("last_update")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+        })
+        .collect()
+}
+
+// =============================================================================
 // Combined Dashboard Data
 // =============================================================================
 
@@ -458,6 +507,7 @@ pub struct DashboardData {
     pub activity: Vec<ActivityEntry>,
     pub auto_config: AutoCycleConfig,
     pub session: SessionData,
+    pub multi_agent: Vec<MultiAgentEntry>,
 }
 
 impl DashboardData {
@@ -478,5 +528,6 @@ pub fn load_dashboard() -> DashboardData {
         activity: load_activity(8),
         auto_config: load_auto_config(),
         session: load_session(),
+        multi_agent: load_multi_agent(),
     }
 }

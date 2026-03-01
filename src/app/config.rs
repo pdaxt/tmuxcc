@@ -13,10 +13,6 @@ pub struct Config {
     #[serde(default = "default_capture_lines")]
     pub capture_lines: u32,
 
-    /// Custom agent patterns (command -> agent type mapping)
-    #[serde(default)]
-    pub agent_patterns: Vec<AgentPattern>,
-
     /// AgentOS API URL (e.g. http://localhost:3100)
     #[serde(default)]
     pub agentos_url: Option<String>,
@@ -30,21 +26,11 @@ fn default_capture_lines() -> u32 {
     100
 }
 
-/// Pattern for detecting agent types
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentPattern {
-    /// Command pattern to match (regex)
-    pub pattern: String,
-    /// Name of the agent type
-    pub agent_type: String,
-}
-
 impl Default for Config {
     fn default() -> Self {
         Self {
             poll_interval_ms: default_poll_interval(),
             capture_lines: default_capture_lines(),
-            agent_patterns: Vec::new(),
             agentos_url: None,
         }
     }
