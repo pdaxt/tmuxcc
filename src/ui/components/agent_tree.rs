@@ -226,6 +226,17 @@ impl AgentTreeWidget {
                         Span::styled(agent.uptime_str(), Style::default().fg(Color::DarkGray)),
                     ];
 
+                    // Branch info if available
+                    if let Some(ref branch) = agent.branch {
+                        if !branch.is_empty() {
+                            info_parts.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
+                            info_parts.push(Span::styled(
+                                format!("\u{2387}{}", truncate_str(branch, 16)),
+                                Style::default().fg(Color::Magenta),
+                            ));
+                        }
+                    }
+
                     // Context bar if available
                     if let Some(ctx) = agent.context_remaining {
                         let bar_color = if ctx > 50 {

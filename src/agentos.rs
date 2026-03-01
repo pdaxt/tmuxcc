@@ -173,6 +173,7 @@ impl AgentOSClient {
             0, // PID unknown from API
         );
         agent.status = status;
+        agent.branch = pane.branch.clone();
         agent.touch();
 
         agent

@@ -264,6 +264,28 @@ pub struct McpServer {
     pub is_rust: bool,
 }
 
+fn load_tool_counts() -> HashMap<String, String> {
+    let path = home_dir()
+        .join(".cache")
+        .join("agentos-tui")
+        .join("tool_counts.json");
+    read_json(&path)
+        .and_then(|v| v.as_object().cloned())
+        .map(|obj| {
+            obj.into_iter()
+                .map(|(k, v)| {
+                    let count = v
+                        .as_u64()
+                        .map(|n| n.to_string())
+                        .or_else(|| v.as_str().map(|s| s.to_string()))
+                        .unwrap_or_else(|| "?".to_string());
+                    (k, count)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 pub fn load_mcps() -> Vec<McpServer> {
     let claude_json = home_dir().join(".claude.json");
     let data = match read_json(&claude_json) {
@@ -276,21 +298,27 @@ pub fn load_mcps() -> Vec<McpServer> {
         None => return Vec::new(),
     };
 
+    let tool_counts = load_tool_counts();
+
     let mut result = Vec::new();
     for (name, cfg) in servers {
         let cmd = cfg
             .get("command")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        let (display_name, tools, is_rust) = if cmd.contains("mcp-mega") || name == "mcp-mega" {
-            ("mcp-mega".to_string(), "887".to_string(), true)
+        let is_rust = cmd.contains("target/release") || cmd.contains("mcp-mega") || cmd.contains("agentos");
+        let display_name: String = if cmd.contains("mcp-mega") || name == "mcp-mega" {
+            "mcp-mega".to_string()
         } else if cmd.contains("agentos") || name == "agentos" {
-            ("agentos".to_string(), "135".to_string(), true)
-        } else if name == "forge" {
-            ("forge".to_string(), "---".to_string(), true)
+            "agentos".to_string()
         } else {
-            (name.chars().take(14).collect(), "?".to_string(), false)
+            name.chars().take(14).collect()
         };
+        let tools = tool_counts
+            .get(&display_name)
+            .or_else(|| tool_counts.get(name))
+            .cloned()
+            .unwrap_or_else(|| "?".to_string());
         result.push(McpServer {
             name: display_name,
             tools,
@@ -354,6 +382,8 @@ pub struct AutoCycleConfig {
     pub max_parallel: u8,
     pub reserved_panes: Vec<u8>,
     pub auto_assign: bool,
+    pub auto_complete: bool,
+    pub default_role: String,
     pub cycle_interval: u32,
 }
 
@@ -385,6 +415,15 @@ pub fn load_auto_config() -> AutoCycleConfig {
             .get("auto_assign")
             .and_then(|v| v.as_bool())
             .unwrap_or(false),
+        auto_complete: data
+            .get("auto_complete")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        default_role: data
+            .get("default_role")
+            .and_then(|v| v.as_str())
+            .unwrap_or("developer")
+            .to_string(),
         cycle_interval: data
             .get("cycle_interval_secs")
             .and_then(|v| v.as_u64())
@@ -495,6 +534,147 @@ pub fn load_multi_agent() -> Vec<MultiAgentEntry> {
 }
 
 // =============================================================================
+// Milestones
+// =============================================================================
+
+#[derive(Debug, Clone)]
+pub struct MilestoneData {
+    pub name: String,
+    pub space: String,
+    pub status: String,
+    pub due_date: Option<String>,
+}
+
+pub fn load_milestones() -> Vec<MilestoneData> {
+    let spaces_dir = home_dir().join(".config").join("collab").join("spaces");
+    let mut milestones = Vec::new();
+
+    if let Ok(entries) = std::fs::read_dir(&spaces_dir) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let space_name = entry.file_name().to_string_lossy().to_string();
+            let ms_dir = entry.path().join("milestones");
+            if !ms_dir.exists() {
+                continue;
+            }
+            if let Ok(files) = std::fs::read_dir(&ms_dir) {
+                for f in files.filter_map(|e| e.ok()) {
+                    if f.path().extension().map(|e| e == "json").unwrap_or(false) {
+                        if let Some(data) = read_json(&f.path()) {
+                            let status = data
+                                .get("status")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("open")
+                                .to_string();
+                            milestones.push(MilestoneData {
+                                name: data
+                                    .get("name")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("?")
+                                    .to_string(),
+                                space: space_name.clone(),
+                                status,
+                                due_date: data
+                                    .get("due_date")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string()),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    milestones
+}
+
+// =============================================================================
+// Processes (Active Workflows)
+// =============================================================================
+
+#[derive(Debug, Clone)]
+pub struct ProcessData {
+    pub id: String,
+    pub template: String,
+    pub space: String,
+    pub status: String,
+    pub total_steps: usize,
+    pub completed_steps: usize,
+}
+
+pub fn load_processes() -> Vec<ProcessData> {
+    let spaces_dir = home_dir().join(".config").join("collab").join("spaces");
+    let mut processes = Vec::new();
+
+    if let Ok(entries) = std::fs::read_dir(&spaces_dir) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                continue;
+            }
+            let space_name = entry.file_name().to_string_lossy().to_string();
+            let proc_dir = entry.path().join("processes");
+            if !proc_dir.exists() {
+                continue;
+            }
+            if let Ok(files) = std::fs::read_dir(&proc_dir) {
+                for f in files.filter_map(|e| e.ok()) {
+                    if f.path().extension().map(|e| e == "json").unwrap_or(false) {
+                        if let Some(data) = read_json(&f.path()) {
+                            let total = data
+                                .get("total_steps")
+                                .and_then(|v| v.as_u64())
+                                .unwrap_or(0) as usize;
+                            let completed = data
+                                .get("completed_steps")
+                                .and_then(|v| v.as_u64())
+                                .or_else(|| {
+                                    data.get("steps").and_then(|v| v.as_array()).map(|steps| {
+                                        steps
+                                            .iter()
+                                            .filter(|s| {
+                                                s.get("done")
+                                                    .and_then(|v| v.as_bool())
+                                                    .unwrap_or(false)
+                                            })
+                                            .count() as u64
+                                    })
+                                })
+                                .unwrap_or(0) as usize;
+
+                            processes.push(ProcessData {
+                                id: data
+                                    .get("id")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("?")
+                                    .to_string(),
+                                template: data
+                                    .get("template")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string(),
+                                space: space_name.clone(),
+                                status: data
+                                    .get("status")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("unknown")
+                                    .to_string(),
+                                total_steps: total,
+                                completed_steps: completed,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    processes
+}
+
+// =============================================================================
 // Combined Dashboard Data
 // =============================================================================
 
@@ -508,6 +688,8 @@ pub struct DashboardData {
     pub auto_config: AutoCycleConfig,
     pub session: SessionData,
     pub multi_agent: Vec<MultiAgentEntry>,
+    pub milestones: Vec<MilestoneData>,
+    pub processes: Vec<ProcessData>,
 }
 
 impl DashboardData {
@@ -529,5 +711,7 @@ pub fn load_dashboard() -> DashboardData {
         auto_config: load_auto_config(),
         session: load_session(),
         multi_agent: load_multi_agent(),
+        milestones: load_milestones(),
+        processes: load_processes(),
     }
 }

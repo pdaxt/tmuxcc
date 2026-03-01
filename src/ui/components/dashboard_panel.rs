@@ -31,13 +31,18 @@ impl DashboardWidget {
 
         // Col 1: Capacity + Auto-cycle
         Self::render_capacity(frame, cols[0], dash);
-        // Col 2: Sprint + Board
+        // Col 2: Sprint + Milestones + Board
         let mid = ratatui::layout::Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(45), Constraint::Percentage(55)])
+            .constraints([
+                Constraint::Percentage(30),
+                Constraint::Percentage(25),
+                Constraint::Percentage(45),
+            ])
             .split(cols[1]);
         Self::render_sprint(frame, mid[0], dash);
-        Self::render_board(frame, mid[1], dash);
+        Self::render_milestones(frame, mid[1], dash);
+        Self::render_board(frame, mid[2], dash);
         // Col 3: MCPs + Activity
         let right = ratatui::layout::Layout::default()
             .direction(Direction::Vertical)
@@ -45,13 +50,18 @@ impl DashboardWidget {
             .split(cols[2]);
         Self::render_mcps(frame, right[0], dash);
         Self::render_activity(frame, right[1], dash);
-        // Col 4: Session + Multi-Agent
+        // Col 4: Session + Processes + Multi-Agent
         let col4 = ratatui::layout::Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .constraints([
+                Constraint::Percentage(30),
+                Constraint::Percentage(35),
+                Constraint::Percentage(35),
+            ])
             .split(cols[3]);
         Self::render_session(frame, col4[0], dash);
-        Self::render_multi_agent(frame, col4[1], dash);
+        Self::render_processes(frame, col4[1], dash);
+        Self::render_multi_agent(frame, col4[2], dash);
         // Col 5: Analytics (digest + alerts from API)
         let analytics = ratatui::layout::Layout::default()
             .direction(Direction::Vertical)
@@ -119,7 +129,7 @@ impl DashboardWidget {
 
         // Auto-cycle
         lines.push(Line::from(vec![
-            Span::raw("Auto: "),
+            Span::raw("Assign: "),
             Span::styled(
                 if auto.auto_assign { "ON" } else { "OFF" },
                 Style::default().fg(if auto.auto_assign {
@@ -128,7 +138,22 @@ impl DashboardWidget {
                     Color::Red
                 }),
             ),
-            Span::raw(format!("  Par:{}  Cyc:{}s", auto.max_parallel, auto.cycle_interval)),
+            Span::raw("  Complete: "),
+            Span::styled(
+                if auto.auto_complete { "ON" } else { "OFF" },
+                Style::default().fg(if auto.auto_complete {
+                    Color::Green
+                } else {
+                    Color::Red
+                }),
+            ),
+        ]));
+        lines.push(Line::from(vec![
+            Span::raw(format!("Par:{}  Cyc:{}s  ", auto.max_parallel, auto.cycle_interval)),
+            Span::styled(
+                format!("Role:{}", auto.default_role),
+                Style::default().fg(Color::DarkGray),
+            ),
         ]));
 
         if !auto.reserved_panes.is_empty() {
@@ -294,6 +319,125 @@ impl DashboardWidget {
 
         let block = Block::default()
             .title(" Board ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::Blue));
+
+        frame.render_widget(Paragraph::new(lines).block(block), area);
+    }
+
+    fn render_milestones(frame: &mut Frame, area: Rect, dash: &DashboardData) {
+        let max_lines = (area.height as usize).saturating_sub(2);
+        let open: Vec<_> = dash
+            .milestones
+            .iter()
+            .filter(|m| m.status != "closed" && m.status != "archived")
+            .collect();
+
+        let lines: Vec<Line> = if open.is_empty() {
+            vec![Line::from(Span::styled(
+                "No milestones",
+                Style::default().fg(Color::DarkGray),
+            ))]
+        } else {
+            open.iter()
+                .take(max_lines)
+                .map(|m| {
+                    let icon = match m.status.as_str() {
+                        "open" => "\u{25cb}",
+                        _ => "\u{25cf}",
+                    };
+                    let due = m
+                        .due_date
+                        .as_deref()
+                        .map(|d| {
+                            if d.len() >= 10 {
+                                format!(" {}", &d[5..10])
+                            } else {
+                                format!(" {}", d)
+                            }
+                        })
+                        .unwrap_or_default();
+                    Line::from(vec![
+                        Span::styled(
+                            format!("{} ", icon),
+                            Style::default().fg(Color::Yellow),
+                        ),
+                        Span::styled(
+                            truncate_dash(&m.name, 16),
+                            Style::default().fg(Color::White),
+                        ),
+                        Span::styled(due, Style::default().fg(Color::DarkGray)),
+                    ])
+                })
+                .collect()
+        };
+
+        let title = format!(" Milestones ({}) ", open.len());
+        let block = Block::default()
+            .title(title)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(Color::Blue));
+
+        frame.render_widget(Paragraph::new(lines).block(block), area);
+    }
+
+    fn render_processes(frame: &mut Frame, area: Rect, dash: &DashboardData) {
+        let max_lines = (area.height as usize).saturating_sub(2);
+        let active: Vec<_> = dash
+            .processes
+            .iter()
+            .filter(|p| p.status == "active")
+            .collect();
+
+        let lines: Vec<Line> = if active.is_empty() {
+            vec![Line::from(Span::styled(
+                "No active workflows",
+                Style::default().fg(Color::DarkGray),
+            ))]
+        } else {
+            active
+                .iter()
+                .take(max_lines)
+                .map(|p| {
+                    let pct = if p.total_steps > 0 {
+                        (p.completed_steps as f64 / p.total_steps as f64 * 100.0) as u8
+                    } else {
+                        0
+                    };
+                    let bar_w = 6;
+                    let filled = (pct as usize * bar_w) / 100;
+                    let bar_color = if pct >= 75 {
+                        Color::Green
+                    } else if pct >= 40 {
+                        Color::Yellow
+                    } else {
+                        Color::Red
+                    };
+                    Line::from(vec![
+                        Span::styled(
+                            truncate_dash(&p.template, 12),
+                            Style::default().fg(Color::White),
+                        ),
+                        Span::raw(" "),
+                        Span::styled(
+                            "\u{2588}".repeat(filled),
+                            Style::default().fg(bar_color),
+                        ),
+                        Span::styled(
+                            "\u{2591}".repeat(bar_w.saturating_sub(filled)),
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                        Span::raw(format!(" {}/{}", p.completed_steps, p.total_steps)),
+                    ])
+                })
+                .collect()
+        };
+
+        let title = format!(" Workflows ({}) ", active.len());
+        let block = Block::default()
+            .title(title)
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Color::Blue));
