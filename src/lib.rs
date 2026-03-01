@@ -3,6 +3,7 @@ pub mod agents;
 pub mod app;
 pub mod monitor;
 pub mod parsers;
+pub mod state_reader;
 pub mod tmux;
 pub mod ui;
 

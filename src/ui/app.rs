@@ -21,8 +21,8 @@ use crate::parsers::ParserRegistry;
 use crate::tmux::TmuxClient;
 
 use super::components::{
-    AgentTreeWidget, FooterWidget, HeaderWidget, HelpWidget, InputWidget, PanePreviewWidget,
-    QueuePanelWidget, SubagentLogWidget,
+    AgentTreeWidget, DashboardWidget, FooterWidget, HeaderWidget, HelpWidget, InputWidget,
+    PanePreviewWidget, QueuePanelWidget, SubagentLogWidget,
 };
 use super::Layout;
 
@@ -111,10 +111,14 @@ async fn run_loop(
         system_stats.refresh();
         state.system_stats = system_stats.stats().clone();
 
+        // Refresh dashboard data periodically
+        state.refresh_dashboard_if_needed();
+
         // Draw UI
         terminal.draw(|frame| {
             let size = frame.area();
-            let main_chunks = Layout::main_layout_with_queue(size, state.show_queue);
+            let main_chunks =
+                Layout::main_layout_full(size, state.show_queue, state.show_dashboard);
 
             // Header
             HeaderWidget::render(frame, main_chunks[0], state);
@@ -162,8 +166,13 @@ async fn run_loop(
                 QueuePanelWidget::render(frame, main_chunks[2], state);
             }
 
+            // Dashboard panel (only when visible)
+            if state.show_dashboard {
+                DashboardWidget::render(frame, main_chunks[3], state);
+            }
+
             // Footer
-            FooterWidget::render(frame, main_chunks[3], state);
+            FooterWidget::render(frame, main_chunks[4], state);
 
             // Help overlay
             if state.show_help {
@@ -202,8 +211,8 @@ async fn run_loop(
                     if let Event::Mouse(mouse) = event {
                         let size = terminal.size()?;
                         let area = ratatui::layout::Rect::new(0, 0, size.width, size.height);
-                        let main_chunks = Layout::main_layout_with_queue(area, state.show_queue);
-                        let footer_area = main_chunks[3];
+                        let main_chunks = Layout::main_layout_full(area, state.show_queue, state.show_dashboard);
+                        let footer_area = main_chunks[4];
                         let (sidebar, _, _, input_area) = Layout::content_layout_with_input(
                             main_chunks[1], state.sidebar_width, 3, state.show_summary_detail
                         );
@@ -503,6 +512,9 @@ async fn run_loop(
                             Action::ToggleQueue => {
                                 state.toggle_queue();
                             }
+                            Action::ToggleDashboard => {
+                                state.toggle_dashboard();
+                            }
                             Action::PreviewScrollUp => {
                                 state.preview_scroll_up(5);
                             }
@@ -595,6 +607,7 @@ fn map_key_to_action(code: KeyCode, modifiers: KeyModifiers, state: &AppState) -
         KeyCode::Char('>') => Action::SidebarWider,
 
         KeyCode::Char('Q') => Action::ToggleQueue,
+        KeyCode::Char('D') => Action::ToggleDashboard,
         KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => Action::PreviewScrollUp,
         KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
             Action::PreviewScrollDown

@@ -1,6 +1,7 @@
 use crate::agentos::AgentOSQueueTask;
 use crate::agents::MonitoredAgent;
 use crate::monitor::SystemStats;
+use crate::state_reader::DashboardData;
 use std::collections::HashSet;
 use std::time::Instant;
 
@@ -118,6 +119,12 @@ pub struct AppState {
     pub agentos_connected: bool,
     /// Whether queue panel is shown
     pub show_queue: bool,
+    /// Dashboard data (capacity, sprint, board, MCPs, activity)
+    pub dashboard: DashboardData,
+    /// Whether dashboard panel is shown
+    pub show_dashboard: bool,
+    /// Last dashboard refresh tick
+    pub dashboard_last_refresh: usize,
 }
 
 impl AppState {
@@ -144,6 +151,9 @@ impl AppState {
             queue_tasks: Vec::new(),
             agentos_connected: false,
             show_queue: true,
+            dashboard: DashboardData::default(),
+            show_dashboard: true,
+            dashboard_last_refresh: 0,
         }
     }
 
@@ -375,6 +385,20 @@ impl AppState {
     /// Toggles queue panel visibility
     pub fn toggle_queue(&mut self) {
         self.show_queue = !self.show_queue;
+    }
+
+    /// Toggles dashboard panel visibility
+    pub fn toggle_dashboard(&mut self) {
+        self.show_dashboard = !self.show_dashboard;
+    }
+
+    /// Refresh dashboard data from local state files (every ~5 seconds)
+    pub fn refresh_dashboard_if_needed(&mut self) {
+        // Refresh every ~62 ticks (~5s at 12fps)
+        if self.tick.wrapping_sub(self.dashboard_last_refresh) > 62 || self.dashboard_last_refresh == 0 {
+            self.dashboard = crate::state_reader::load_dashboard();
+            self.dashboard_last_refresh = self.tick;
+        }
     }
 
     /// Sets an error message

@@ -69,6 +69,8 @@ pub enum Action {
     ScrollDown,
     /// Toggle queue panel visibility
     ToggleQueue,
+    /// Toggle dashboard panel visibility
+    ToggleDashboard,
     /// Scroll preview up
     PreviewScrollUp,
     /// Scroll preview down
@@ -117,6 +119,7 @@ impl Action {
             Action::ScrollUp => "Scroll up",
             Action::ScrollDown => "Scroll down",
             Action::ToggleQueue => "Toggle queue panel",
+            Action::ToggleDashboard => "Toggle dashboard panel",
             Action::PreviewScrollUp => "Scroll preview up",
             Action::PreviewScrollDown => "Scroll preview down",
             Action::PreviewScrollBottom => "Scroll to bottom",

@@ -43,6 +43,50 @@ pub struct AgentOSQueueTask {
     pub completed_at: Option<String>,
 }
 
+/// 24h daily digest from /api/analytics/digest
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct AnalyticsDigest {
+    #[serde(default)]
+    pub tool_calls: i64,
+    #[serde(default)]
+    pub errors: i64,
+    #[serde(default)]
+    pub error_rate: String,
+    #[serde(default)]
+    pub commits: i64,
+    #[serde(default)]
+    pub files_touched: i64,
+    #[serde(default)]
+    pub agents_active: i64,
+    #[serde(default)]
+    pub tasks_completed: i64,
+}
+
+/// Single alert from /api/analytics/alerts
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct Alert {
+    #[serde(default)]
+    pub level: String,
+    #[serde(rename = "type", default)]
+    pub alert_type: String,
+    // Optional extra fields depending on alert type
+    #[serde(default)]
+    pub pane_id: Option<String>,
+    #[serde(default)]
+    pub project: Option<String>,
+    #[serde(default)]
+    pub error_rate: Option<String>,
+}
+
+/// Alerts response from /api/analytics/alerts
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct AlertsResponse {
+    #[serde(default)]
+    pub alerts: Vec<Alert>,
+    #[serde(default)]
+    pub count: i64,
+}
+
 #[derive(Debug, Deserialize)]
 struct StatusResponse {
     panes: Vec<AgentOSPane>,
@@ -81,6 +125,20 @@ impl AgentOSClient {
         let url = format!("{}/api/queue", self.api_url);
         let resp: QueueResponse = self.client.get(&url).send().await?.json().await?;
         Ok(resp.tasks)
+    }
+
+    /// Fetch 24h analytics digest
+    pub async fn fetch_digest(&self) -> anyhow::Result<AnalyticsDigest> {
+        let url = format!("{}/api/analytics/digest", self.api_url);
+        let resp: AnalyticsDigest = self.client.get(&url).send().await?.json().await?;
+        Ok(resp)
+    }
+
+    /// Fetch active alerts
+    pub async fn fetch_alerts(&self) -> anyhow::Result<AlertsResponse> {
+        let url = format!("{}/api/analytics/alerts", self.api_url);
+        let resp: AlertsResponse = self.client.get(&url).send().await?.json().await?;
+        Ok(resp)
     }
 
     /// Fetch pane output (last N lines)

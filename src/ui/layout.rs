@@ -9,16 +9,23 @@ impl Layout {
         Self::main_layout_with_queue(area, true)
     }
 
-    /// Creates the main layout with configurable queue visibility
+    /// Creates the main layout with configurable queue and dashboard visibility
     pub fn main_layout_with_queue(area: Rect, show_queue: bool) -> Vec<Rect> {
+        Self::main_layout_full(area, show_queue, false)
+    }
+
+    /// Creates the main layout with all optional panels
+    pub fn main_layout_full(area: Rect, show_queue: bool, show_dashboard: bool) -> Vec<Rect> {
         let queue_height = if show_queue { 8 } else { 0 };
+        let dashboard_height = if show_dashboard { 12 } else { 0 };
         ratatui::layout::Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),            // Header
-                Constraint::Min(10),              // Content area (agents + preview)
-                Constraint::Length(queue_height), // Queue panel (0 when hidden)
-                Constraint::Length(1),            // Footer (1 line, no border)
+                Constraint::Length(3),                // Header
+                Constraint::Min(10),                  // Content area (agents + preview)
+                Constraint::Length(queue_height),      // Queue panel
+                Constraint::Length(dashboard_height),  // Dashboard panel
+                Constraint::Length(1),                 // Footer
             ])
             .split(area)
             .to_vec()

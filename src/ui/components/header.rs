@@ -70,6 +70,34 @@ impl HeaderWidget {
             ));
         }
 
+        // ACU usage from dashboard
+        let cap = &state.dashboard.capacity;
+        if cap.acu_total > 0.0 {
+            spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
+            let acu_pct = cap.acu_pct();
+            let acu_color = if acu_pct > 80.0 {
+                Color::Red
+            } else if acu_pct > 50.0 {
+                Color::Yellow
+            } else {
+                Color::Green
+            };
+            spans.push(Span::styled(
+                format!(" ACU:{:.0}/{:.0} ({:.0}%) ", cap.acu_used, cap.acu_total, acu_pct),
+                Style::default().fg(acu_color),
+            ));
+        }
+
+        // MCP tool count
+        let total_tools = state.dashboard.total_mcp_tools();
+        if total_tools > 0 {
+            spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(
+                format!(" {}+ tools ", total_tools),
+                Style::default().fg(Color::Magenta),
+            ));
+        }
+
         // System stats: CPU
         spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
         let cpu_color = if state.system_stats.cpu_usage > 80.0 {
