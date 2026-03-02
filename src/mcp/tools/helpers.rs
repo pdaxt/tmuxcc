@@ -176,7 +176,6 @@ pub fn calculate_acu(started_at: &str) -> f64 {
 /// Git result from finalize_git
 pub struct GitResult {
     pub info: serde_json::Value,
-    pub pr_url: String,
 }
 
 /// Commit, push, create PR, optionally auto-merge, and cleanup worktree
@@ -206,7 +205,7 @@ pub fn finalize_git(ws: &str, branch: &str, base_project: &str, pane_num: u8, ta
         "worktree_removed": remove_result.is_ok(),
         "branch": branch,
     });
-    GitResult { info, pr_url }
+    GitResult { info }
 }
 
 /// Attach commits/files to tracker issue (feature-to-code bridge)

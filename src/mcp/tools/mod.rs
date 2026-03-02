@@ -10,6 +10,7 @@ pub mod routing;
 pub mod git_tools;
 pub mod queue_tools;
 pub mod monitoring;
+pub mod tracker_tools;
 
 // ── Re-exports (flat namespace for backward compat) ──
 

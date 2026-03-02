@@ -637,15 +637,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<IssueCreateRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::tracker::issue_create(
-            &req.space, &req.title,
-            &req.issue_type.unwrap_or_default(), &req.priority.unwrap_or_default(),
-            &req.description.unwrap_or_default(), &req.assignee.unwrap_or_default(),
-            &req.milestone.unwrap_or_default(), &req.labels.unwrap_or_default(),
-            req.estimated_acu.unwrap_or(0.0), &req.role.unwrap_or_default(),
-            &req.sprint.unwrap_or_default(), &req.parent.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::tracker_tools::issue_create(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Update an issue's fields: status, priority, assignee, labels, ACU, etc.")]
@@ -653,16 +646,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<IssueUpdateFullRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::tracker::issue_update_full(
-            &req.space, &req.issue_id,
-            &req.status.unwrap_or_default(), &req.priority.unwrap_or_default(),
-            &req.assignee.unwrap_or_default(), &req.title.unwrap_or_default(),
-            &req.description.unwrap_or_default(), &req.milestone.unwrap_or_default(),
-            &req.add_label.unwrap_or_default(), &req.remove_label.unwrap_or_default(),
-            req.estimated_acu.unwrap_or(0.0), req.actual_acu.unwrap_or(0.0),
-            &req.role.unwrap_or_default(), &req.sprint.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::tracker_tools::issue_update_full(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "List issues with filters: status, type, priority, assignee, milestone, label, sprint, role.")]
@@ -670,13 +655,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<IssueListFilteredRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::tracker::issue_list_filtered(
-            &req.space, &req.status.unwrap_or_default(), &req.issue_type.unwrap_or_default(),
-            &req.priority.unwrap_or_default(), &req.assignee.unwrap_or_default(),
-            &req.milestone.unwrap_or_default(), &req.label.unwrap_or_default(),
-            &req.sprint.unwrap_or_default(), &req.role.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::tracker_tools::issue_list_filtered(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "View full details of a single issue including comments and links.")]
@@ -684,8 +664,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<IssueViewRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::tracker::issue_view(&req.space, &req.issue_id);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::tracker_tools::issue_view(&req.space, &req.issue_id);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Add a comment to an issue.")]
@@ -693,10 +673,10 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<IssueCommentRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::tracker::issue_comment(
-            &req.space, &req.issue_id, &req.text, &req.author.unwrap_or_else(|| "agent".into()),
+        let result = tools::tracker_tools::issue_comment(
+            &req.space, &req.issue_id, &req.text, &req.author.clone().unwrap_or_else(|| "agent".into()),
         );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Link a doc, commit, or PR to an issue.")]
@@ -704,8 +684,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<IssueLinkRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::tracker::issue_link(&req.space, &req.issue_id, &req.link_type, &req.reference);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::tracker_tools::issue_link(&req.space, &req.issue_id, &req.link_type, &req.reference);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Close an issue with a resolution note.")]
@@ -713,10 +693,10 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<IssueCloseRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::tracker::issue_close(
-            &req.space, &req.issue_id, &req.resolution.unwrap_or_default().as_str(),
+        let result = tools::tracker_tools::issue_close(
+            &req.space, &req.issue_id, req.resolution.as_deref().unwrap_or(""),
         );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Create a milestone for a space with optional due date.")]
@@ -724,10 +704,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<MilestoneCreateRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::tracker::milestone_create(
-            &req.space, &req.name, &req.description.unwrap_or_default(), &req.due_date.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::tracker_tools::milestone_create(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "List milestones with progress for a space.")]
@@ -735,8 +713,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<MilestoneListRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::tracker::milestone_list(&req.space);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::tracker_tools::milestone_list(&req.space);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Generate a Mermaid Gantt timeline from open issues.")]
@@ -744,8 +722,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<TimelineGenerateRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::tracker::timeline_generate(&req.space, &req.milestone.unwrap_or_default());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::tracker_tools::timeline_generate(&req.space, &req.milestone.clone().unwrap_or_default());
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Start a process from a checklist template. Context vars substitute {{var}} placeholders.")]
@@ -792,8 +770,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<BoardViewRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::tracker::board_view(&req.space);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::tracker_tools::board_view(&req.space);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     // === FEATURE MANAGEMENT TOOLS (4 tools) ===
@@ -821,8 +799,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<FeatureToQueueRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::tracker::feature_to_queue(&req.space, &req.issue_ids, req.sequential.unwrap_or(false));
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::tracker_tools::feature_to_queue(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Hierarchical feature status: parent feature → child micro-features → queue task status. Shows overall progress.")]

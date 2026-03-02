@@ -188,31 +188,33 @@ async fn execute_command(app: &App, cmd: TuiCommand) -> TuiResult {
         }
         TuiCommand::FeatureCreate { space, title, issue_type, priority } => {
             let desc = format!("Create: {}", &title);
-            let pri = priority.as_deref().unwrap_or("medium");
-            let result = crate::tracker::issue_create(
-                &space, &title, &issue_type, pri,
-                "", "", "", &[], 0.0, "", "", "",
-            );
-            let id = result.get("created").and_then(|v| v.as_str()).unwrap_or("?");
-            let message = format!("Created {} in {}", id, space);
-            let success = !result.get("error").is_some();
-            TuiResult { description: desc, success, message }
+            let result = tools::tracker_tools::issue_create(&types::IssueCreateRequest {
+                space, title, issue_type: Some(issue_type),
+                priority, description: None, assignee: None,
+                milestone: None, labels: None, estimated_acu: None,
+                role: None, parent: None, sprint: None,
+            });
+            let success = !result.contains("\"error\"");
+            TuiResult { description: desc, success, message: result }
         }
         TuiCommand::FeatureToQueue { space, issue_ids } => {
             let desc = format!("Queue {} issues", issue_ids.len());
-            let result = crate::tracker::feature_to_queue(&space, &issue_ids, false);
-            let message = serde_json::to_string(&result).unwrap_or_default();
-            let success = !message.contains("\"error\"");
-            TuiResult { description: desc, success, message }
+            let result = tools::tracker_tools::feature_to_queue(&types::FeatureToQueueRequest {
+                space, issue_ids, sequential: Some(false),
+            });
+            let success = !result.contains("\"error\"");
+            TuiResult { description: desc, success, message: result }
         }
         TuiCommand::IssueUpdateStatus { space, issue_id, status } => {
             let desc = format!("{} → {}", issue_id, status);
-            let result = crate::tracker::issue_update_full(
-                &space, &issue_id, &status,
-                "", "", "", "", "", "", "", 0.0, 0.0, "", "",
-            );
-            let message = serde_json::to_string(&result).unwrap_or_default();
-            TuiResult { description: desc, success: true, message }
+            let result = tools::tracker_tools::issue_update_full(&types::IssueUpdateFullRequest {
+                space, issue_id, status: Some(status),
+                priority: None, assignee: None, title: None,
+                description: None, milestone: None, add_label: None,
+                remove_label: None, estimated_acu: None, actual_acu: None,
+                sprint: None, role: None,
+            });
+            TuiResult { description: desc, success: true, message: result }
         }
     }
 }
@@ -345,7 +347,7 @@ fn handle_navigate(
     mode: &mut TuiMode,
     view_mode: &mut ViewMode,
     selected: &mut u8,
-    app: &App,
+    _app: &App,
     cmd_tx: &mpsc::Sender<TuiCommand>,
 ) -> Option<bool> {
     match key.code {
@@ -432,18 +434,20 @@ fn handle_navigate(
             *selected = if *selected <= 1 { max } else { *selected - 1 };
         }
 
-        // Send Ctrl-C to pane
+        // Kill pane (routes through MCP tools::kill)
         KeyCode::Char('x') => {
-            let mut pty = app.pty_lock();
-            if let Some(agent) = pty.agents.get_mut(selected) {
-                let _ = agent.send_ctrl_c();
-            }
+            let _ = cmd_tx.send(TuiCommand::Kill {
+                pane: selected.to_string(),
+                reason: Some("TUI: user pressed x".into()),
+            });
         }
 
-        // Restart (kill via PTY)
+        // Restart pane (kill + respawn via command channel)
         KeyCode::Char('r') => {
-            let mut pty = app.pty_lock();
-            let _ = pty.kill(*selected);
+            let _ = cmd_tx.send(TuiCommand::Kill {
+                pane: selected.to_string(),
+                reason: Some("TUI: restart via r key".into()),
+            });
         }
 
         _ => {}

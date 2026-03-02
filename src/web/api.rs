@@ -14,9 +14,12 @@ use crate::mcp::{tools, types};
 
 type AppState = Arc<App>;
 
-/// Parse MCP tool JSON string result into Value
+/// Parse MCP tool JSON string result into Value, logging failures
 fn parse_mcp(result: &str) -> Value {
-    serde_json::from_str(result).unwrap_or(json!({"error": "parse failed"}))
+    serde_json::from_str(result).unwrap_or_else(|e| {
+        tracing::warn!("MCP tool returned unparseable JSON: {} (input: {})", e, &result[..result.len().min(200)]);
+        json!({"error": "parse failed", "raw": &result[..result.len().min(500)]})
+    })
 }
 
 /// GET / — Serve dashboard HTML
@@ -26,16 +29,19 @@ pub async fn index() -> Html<&'static str> {
 
 // === Query parameter structs ===
 
+/// Query parameter for filtering by tracker space
 #[derive(Deserialize, Default)]
 pub struct SpaceQuery {
     pub space: Option<String>,
 }
 
+/// Query parameter for selecting a sprint
 #[derive(Deserialize, Default)]
 pub struct SprintQuery {
     pub sprint: Option<String>,
 }
 
+/// Query parameter for pane output (line count)
 #[derive(Deserialize, Default)]
 pub struct PaneQuery {
     pub lines: Option<usize>,
