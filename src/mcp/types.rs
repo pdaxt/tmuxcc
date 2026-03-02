@@ -228,6 +228,32 @@ pub struct QueueDoneRequest {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct QueueCancelRequest {
+    #[schemars(description = "Task ID to cancel (marks as failed and cascades to dependents)")]
+    pub task_id: String,
+    #[schemars(description = "Reason for cancellation")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct QueueRetryRequest {
+    #[schemars(description = "Task ID to retry (must be failed and under max_retries)")]
+    pub task_id: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct QueueClearRequest {
+    #[schemars(description = "Clear tasks with this status: done, failed, or all (default: done)")]
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FactoryDetectRequest {
+    #[schemars(description = "Natural language description — auto-detects which project it refers to")]
+    pub description: String,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct AutoConfigRequest {
     #[schemars(description = "Max parallel panes (1-9)")]
     pub max_parallel: Option<u8>,

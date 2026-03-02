@@ -165,6 +165,46 @@ pub async fn factory_cancel(app: &App, req: &FactoryStatusRequest) -> String {
     }
 }
 
+/// Detect which project a description refers to (standalone diagnostic).
+pub fn factory_detect(req: &FactoryDetectRequest) -> String {
+    match factory::detect_project(&req.description) {
+        Some((name, confidence)) => serde_json::json!({
+            "project": name,
+            "confidence": format!("{:.0}%", confidence * 100.0),
+            "confidence_raw": confidence,
+        }).to_string(),
+        None => json_err("No project matched. Check ~/Projects for git repos or run project_scan."),
+    }
+}
+
+/// Get saved quality gate results for a pipeline.
+pub fn factory_gate_result(req: &FactoryStatusRequest) -> String {
+    let pid = match &req.pipeline_id {
+        Some(pid) => pid,
+        None => return json_err("pipeline_id required"),
+    };
+    match factory::get_gate_result(pid) {
+        Some(gate) => serde_json::json!({
+            "pipeline_id": gate.pipeline_id,
+            "project": gate.project,
+            "passed": gate.passed,
+            "build": gate.build.as_ref().map(|c| serde_json::json!({
+                "command": c.command, "success": c.success,
+                "duration_ms": c.duration_ms, "output": truncate(&c.output, 500),
+            })),
+            "test": gate.test.as_ref().map(|c| serde_json::json!({
+                "command": c.command, "success": c.success,
+                "duration_ms": c.duration_ms, "output": truncate(&c.output, 500),
+            })),
+            "lint": gate.lint.as_ref().map(|c| serde_json::json!({
+                "command": c.command, "success": c.success,
+                "duration_ms": c.duration_ms, "output": truncate(&c.output, 500),
+            })),
+        }).to_string(),
+        None => json_err(&format!("No gate results found for pipeline '{}'", pid)),
+    }
+}
+
 /// Scan for conflicts in a pipeline's project.
 pub fn conflict_scan(req: &FactoryStatusRequest) -> String {
     match &req.pipeline_id {

@@ -60,6 +60,9 @@ pub async fn dispatch_mcp_tool(app: &App, tool: &str, args: Value) -> String {
         "queue_done" | "os_queue_done" => tools::queue_done(app, deser!(args, QueueDoneRequest)).await,
         "auto" | "os_auto" | "auto_cycle" => tools::auto_cycle(app).await,
         "auto_config" | "os_auto_config" => tools::auto_config(app, deser!(args, AutoConfigRequest)).await,
+        "queue_cancel" | "os_queue_cancel" => tools::queue_cancel(app, deser!(args, QueueCancelRequest)).await,
+        "queue_retry" | "os_queue_retry" => tools::queue_retry(app, deser!(args, QueueRetryRequest)).await,
+        "queue_clear" | "os_queue_clear" => tools::queue_clear(app, deser!(args, QueueClearRequest)).await,
 
         // === MULTI-AGENT: PORTS ===
         "port_allocate" => {
@@ -654,6 +657,8 @@ pub async fn dispatch_mcp_tool(app: &App, tool: &str, args: Value) -> String {
         "factory_gate" | "gate" => tools::factory_tools::factory_gate(&deser!(args, FactoryStatusRequest)),
         "pipeline_conflicts" => tools::factory_tools::conflict_scan(&deser!(args, FactoryStatusRequest)),
         "factory_cancel" | "pipeline_cancel" | "cancel_pipeline" => tools::factory_tools::factory_cancel(app, &deser!(args, FactoryStatusRequest)).await,
+        "factory_detect" | "detect_project" => tools::factory_tools::factory_detect(&deser!(args, FactoryDetectRequest)),
+        "factory_gate_result" | "gate_result" => tools::factory_tools::factory_gate_result(&deser!(args, FactoryStatusRequest)),
 
         // === ORCHESTRATION ===
         "orchestrate" => tools::orchestrate::orchestrate(app, deser!(args, OrchestrateRequest)).await,
@@ -708,6 +713,9 @@ pub const MCP_TOOLS: &[(&str, &str)] = &[
     ("queue_done", "Mark task done"),
     ("auto", "Run auto-cycle"),
     ("auto_config", "Configure auto-cycle"),
+    ("queue_cancel", "Cancel a queue task"),
+    ("queue_retry", "Retry a failed task"),
+    ("queue_clear", "Clear done/failed tasks"),
     // Ports
     ("port_allocate", "Allocate a port"),
     ("port_release", "Release a port"),
@@ -885,6 +893,8 @@ pub const MCP_TOOLS: &[(&str, &str)] = &[
     ("gate", "Run quality gate on pipeline"),
     ("pipeline_conflicts", "Scan pipeline file conflicts"),
     ("factory_cancel", "Cancel a pipeline"),
+    ("factory_detect", "Detect project from text"),
+    ("gate_result", "View saved gate results"),
     // Orchestration
     ("orchestrate", "Auto-build: NL → agents"),
     // Gateway (micro MCPs)

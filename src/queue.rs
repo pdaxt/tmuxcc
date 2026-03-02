@@ -330,6 +330,21 @@ pub fn requeue_failed(task_id: &str) -> Result<bool> {
     Ok(requeued)
 }
 
+/// Clear tasks by status (done, failed, or both)
+pub fn clear_tasks(status: &str) -> Result<u32> {
+    let mut queue = load_queue();
+    let before = queue.tasks.len();
+    queue.tasks.retain(|t| match status {
+        "done" => t.status != QueueStatus::Done,
+        "failed" => t.status != QueueStatus::Failed,
+        "all" => t.status != QueueStatus::Done && t.status != QueueStatus::Failed,
+        _ => true,
+    });
+    let removed = (before - queue.tasks.len()) as u32;
+    save_queue(&queue)?;
+    Ok(removed)
+}
+
 /// Get running task for a pane
 pub fn task_for_pane(pane: u8) -> Option<QueueTask> {
     let queue = load_queue();

@@ -333,6 +333,51 @@ impl AgentOSService {
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
+    #[tool(description = "Cancel a specific queue task. Marks it as failed and cascades failure to dependent tasks.")]
+    async fn os_queue_cancel(
+        &self,
+        Parameters(req): Parameters<QueueCancelRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = tools::queue_cancel(&self.app, req).await;
+        Ok(CallToolResult::success(vec![Content::text(result)]))
+    }
+
+    #[tool(description = "Retry a failed queue task. Resets to pending and increments retry count. Must be under max_retries.")]
+    async fn os_queue_retry(
+        &self,
+        Parameters(req): Parameters<QueueRetryRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = tools::queue_retry(&self.app, req).await;
+        Ok(CallToolResult::success(vec![Content::text(result)]))
+    }
+
+    #[tool(description = "Clear completed and/or failed tasks from the queue. Filter: done (default), failed, or all.")]
+    async fn os_queue_clear(
+        &self,
+        Parameters(req): Parameters<QueueClearRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = tools::queue_clear(&self.app, req).await;
+        Ok(CallToolResult::success(vec![Content::text(result)]))
+    }
+
+    #[tool(description = "Detect which project a natural language description refers to. Returns project name and confidence score.")]
+    async fn factory_detect(
+        &self,
+        Parameters(req): Parameters<FactoryDetectRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = tools::factory_tools::factory_detect(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
+    }
+
+    #[tool(description = "Get saved quality gate results (build/test/lint) for a pipeline. Shows pass/fail and command output.")]
+    async fn factory_gate_result(
+        &self,
+        Parameters(req): Parameters<FactoryStatusRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = tools::factory_tools::factory_gate_result(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
+    }
+
     // === MULTI-AGENT COORDINATION (37 tools) ===
 
     #[tool(description = "Allocate a port for a service. Finds free port in 3001-3099 range, checks for conflicts.")]

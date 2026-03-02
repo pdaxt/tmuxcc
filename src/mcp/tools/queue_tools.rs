@@ -184,6 +184,44 @@ pub async fn queue_done(_app: &App, req: QueueDoneRequest) -> String {
     }
 }
 
+/// Cancel a specific queue task (marks failed, cascades to dependents)
+pub async fn queue_cancel(_app: &App, req: QueueCancelRequest) -> String {
+    let reason = req.reason.unwrap_or_else(|| "Manually cancelled".into());
+    match queue::mark_failed(&req.task_id, &reason) {
+        Ok(()) => serde_json::json!({
+            "status": "cancelled",
+            "task_id": req.task_id,
+            "reason": reason,
+        }).to_string(),
+        Err(e) => json_err(&format!("Failed to cancel: {}", e)),
+    }
+}
+
+/// Retry a failed queue task (resets to pending, increments retry count)
+pub async fn queue_retry(_app: &App, req: QueueRetryRequest) -> String {
+    match queue::requeue_failed(&req.task_id) {
+        Ok(true) => serde_json::json!({
+            "status": "requeued",
+            "task_id": req.task_id,
+        }).to_string(),
+        Ok(false) => json_err("Task not eligible for retry (not failed or max retries reached)"),
+        Err(e) => json_err(&format!("Failed to retry: {}", e)),
+    }
+}
+
+/// Clear completed/failed tasks from the queue
+pub async fn queue_clear(_app: &App, req: QueueClearRequest) -> String {
+    let status = req.status.as_deref().unwrap_or("done");
+    match queue::clear_tasks(status) {
+        Ok(removed) => serde_json::json!({
+            "status": "cleared",
+            "removed": removed,
+            "filter": status,
+        }).to_string(),
+        Err(e) => json_err(&format!("Failed to clear: {}", e)),
+    }
+}
+
 /// Auto-cycle: scan all panes, complete finished agents, spawn next tasks
 pub async fn auto_cycle(app: &App) -> String {
     // Process-level lock
@@ -246,13 +284,34 @@ pub async fn auto_cycle(app: &App) -> String {
                         if qt.role == "developer" {
                             match crate::factory::run_gate(pid) {
                                 Ok(gate) => {
-                                    actions.push(serde_json::json!({
-                                        "action": "quality_gate",
-                                        "pipeline_id": pid,
-                                        "passed": gate.passed,
-                                        "build": gate.build.as_ref().map(|c| c.success),
-                                        "test": gate.test.as_ref().map(|c| c.success),
-                                    }));
+                                    if !gate.passed {
+                                        // Gate failed — block dependent tasks so QA/security don't run on broken code
+                                        let q = queue::load_queue();
+                                        let dep_ids: Vec<String> = q.tasks.iter()
+                                            .filter(|t| t.pipeline_id.as_deref() == Some(pid.as_str())
+                                                && t.depends_on.contains(&qt.id)
+                                                && (t.status == queue::QueueStatus::Pending || t.status == queue::QueueStatus::Blocked))
+                                            .map(|t| t.id.clone())
+                                            .collect();
+                                        for dep_id in &dep_ids {
+                                            let _ = queue::mark_failed(dep_id, &format!("Quality gate failed for pipeline {}", pid));
+                                        }
+                                        actions.push(serde_json::json!({
+                                            "action": "quality_gate_block",
+                                            "pipeline_id": pid,
+                                            "blocked_tasks": dep_ids.len(),
+                                            "build": gate.build.as_ref().map(|c| c.success),
+                                            "test": gate.test.as_ref().map(|c| c.success),
+                                        }));
+                                    } else {
+                                        actions.push(serde_json::json!({
+                                            "action": "quality_gate",
+                                            "pipeline_id": pid,
+                                            "passed": true,
+                                            "build": gate.build.as_ref().map(|c| c.success),
+                                            "test": gate.test.as_ref().map(|c| c.success),
+                                        }));
+                                    }
                                 }
                                 Err(e) => {
                                     actions.push(serde_json::json!({
