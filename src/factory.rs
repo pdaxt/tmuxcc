@@ -240,19 +240,22 @@ pub fn create_pipeline(
                 prev_group_ids.clone(),
             )?;
 
-            // Set pipeline_id on the created task
-            let mut q = queue::load_queue();
-            if let Some(t) = q.tasks.iter_mut().find(|t| t.id == task.id) {
-                t.pipeline_id = Some(pipeline_id.clone());
-            }
-            queue::save_queue(&q)?;
-
             group_ids.push(task.id.clone());
             task_ids.push(task.id);
         }
 
         prev_group_ids = group_ids;
     }
+
+    // Batch-assign pipeline_id to all tasks in one load+save (not N+1)
+    let mut q = queue::load_queue();
+    let id_set: HashSet<&str> = task_ids.iter().map(|s| s.as_str()).collect();
+    for t in q.tasks.iter_mut() {
+        if id_set.contains(t.id.as_str()) {
+            t.pipeline_id = Some(pipeline_id.clone());
+        }
+    }
+    queue::save_queue(&q)?;
 
     Ok((pipeline_id, task_ids))
 }
@@ -357,9 +360,102 @@ pub fn list_pipelines() -> Vec<PipelineView> {
     pipelines
 }
 
-/// Get a single pipeline by ID.
+/// Get a single pipeline by ID. Direct lookup — only loads tasks for this pipeline.
 pub fn get_pipeline(pipeline_id: &str) -> Option<PipelineView> {
-    list_pipelines().into_iter().find(|p| p.id == pipeline_id)
+    let q = queue::load_queue();
+    let tasks: Vec<&queue::QueueTask> = q.tasks.iter()
+        .filter(|t| t.pipeline_id.as_deref() == Some(pipeline_id))
+        .collect();
+
+    if tasks.is_empty() {
+        return None;
+    }
+
+    let stages: Vec<StageView> = tasks.iter().map(|t| {
+        let name = t.task.strip_prefix('[')
+            .and_then(|s| s.split(']').next())
+            .unwrap_or("?")
+            .to_string();
+        let summary = t.result.as_ref().map(|r| r.chars().take(60).collect());
+        StageView {
+            name,
+            role: t.role.clone(),
+            task_id: t.id.clone(),
+            status: format!("{:?}", t.status).to_lowercase(),
+            pane: t.pane,
+            summary,
+        }
+    }).collect();
+
+    let project = tasks.first().map(|t| t.project.clone()).unwrap_or_default();
+    let description = tasks.first()
+        .map(|t| t.task.split(']').last().unwrap_or(&t.task).trim().to_string())
+        .unwrap_or_default();
+    let created_at = tasks.first().map(|t| t.added_at.clone()).unwrap_or_default();
+
+    let status = if tasks.iter().any(|t| t.status == queue::QueueStatus::Failed) {
+        "failed"
+    } else if tasks.iter().all(|t| t.status == queue::QueueStatus::Done) {
+        "done"
+    } else if tasks.iter().any(|t| t.status == queue::QueueStatus::Running) {
+        "running"
+    } else {
+        "pending"
+    }.to_string();
+
+    let stage_names: Vec<&str> = stages.iter().map(|s| s.name.as_str()).collect();
+    let template = if stage_names.iter().any(|n| *n == "pentest") { "secure" }
+        else if stage_names.iter().any(|n| *n == "review") { "full" }
+        else if stage_names.len() <= 2 { "quick" }
+        else { "custom" }.to_string();
+
+    Some(PipelineView { id: pipeline_id.to_string(), project, description, template, created_at, status, stages })
+}
+
+/// Cancel a pipeline: mark all pending/blocked stages as failed, return running pane IDs for killing.
+pub fn cancel_pipeline(pipeline_id: &str) -> Result<CancelResult> {
+    let mut q = queue::load_queue();
+    let mut cancelled = 0u32;
+    let mut running_panes: Vec<u8> = Vec::new();
+
+    for task in q.tasks.iter_mut() {
+        if task.pipeline_id.as_deref() != Some(pipeline_id) {
+            continue;
+        }
+        match task.status {
+            queue::QueueStatus::Pending | queue::QueueStatus::Blocked => {
+                task.status = queue::QueueStatus::Failed;
+                task.last_error = Some("Pipeline cancelled".to_string());
+                task.completed_at = Some(chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string());
+                cancelled += 1;
+            }
+            queue::QueueStatus::Running => {
+                task.status = queue::QueueStatus::Failed;
+                task.last_error = Some("Pipeline cancelled".to_string());
+                task.completed_at = Some(chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string());
+                if let Some(pane) = task.pane {
+                    running_panes.push(pane);
+                }
+                cancelled += 1;
+            }
+            _ => {} // Done/Failed already — leave as-is
+        }
+    }
+
+    queue::save_queue(&q)?;
+
+    Ok(CancelResult {
+        pipeline_id: pipeline_id.to_string(),
+        cancelled_tasks: cancelled,
+        running_panes,
+    })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CancelResult {
+    pub pipeline_id: String,
+    pub cancelled_tasks: u32,
+    pub running_panes: Vec<u8>,
 }
 
 // ============================================================
@@ -468,35 +564,80 @@ pub fn run_gate(pipeline_id: &str) -> Result<GateResult> {
     Ok(result)
 }
 
+/// Gate command timeout (5 minutes)
+const GATE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
 /// Run a single command in a project directory, capturing output and timing.
+/// Times out after 5 minutes to prevent hanging the auto_cycle.
 fn run_check(project_path: &str, command: &str) -> GateCheck {
     let start = std::time::Instant::now();
-    let output = std::process::Command::new("sh")
+    let child = std::process::Command::new("sh")
         .arg("-c")
         .arg(command)
         .current_dir(project_path)
-        .output();
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn();
 
-    let duration_ms = start.elapsed().as_millis() as u64;
-
-    match output {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            let combined: String = format!("{}{}", stdout, stderr).chars().take(2000).collect();
-            GateCheck {
+    let mut child = match child {
+        Ok(c) => c,
+        Err(e) => {
+            return GateCheck {
                 command: command.to_string(),
-                success: out.status.success(),
-                output: combined,
-                duration_ms,
+                success: false,
+                output: format!("Failed to spawn: {}", e),
+                duration_ms: start.elapsed().as_millis() as u64,
+            };
+        }
+    };
+
+    // Poll with timeout
+    let deadline = std::time::Instant::now() + GATE_TIMEOUT;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let duration_ms = start.elapsed().as_millis() as u64;
+                let stdout = child.stdout.take()
+                    .map(|mut s| { let mut b = Vec::new(); std::io::Read::read_to_end(&mut s, &mut b).ok(); b })
+                    .unwrap_or_default();
+                let stderr = child.stderr.take()
+                    .map(|mut s| { let mut b = Vec::new(); std::io::Read::read_to_end(&mut s, &mut b).ok(); b })
+                    .unwrap_or_default();
+                let combined: String = format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&stdout),
+                    String::from_utf8_lossy(&stderr),
+                ).chars().take(2000).collect();
+
+                return GateCheck {
+                    command: command.to_string(),
+                    success: status.success(),
+                    output: combined,
+                    duration_ms,
+                };
+            }
+            Ok(None) => {
+                if std::time::Instant::now() > deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return GateCheck {
+                        command: command.to_string(),
+                        success: false,
+                        output: format!("TIMEOUT: command exceeded {}s limit", GATE_TIMEOUT.as_secs()),
+                        duration_ms: start.elapsed().as_millis() as u64,
+                    };
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(e) => {
+                return GateCheck {
+                    command: command.to_string(),
+                    success: false,
+                    output: format!("Wait error: {}", e),
+                    duration_ms: start.elapsed().as_millis() as u64,
+                };
             }
         }
-        Err(e) => GateCheck {
-            command: command.to_string(),
-            success: false,
-            output: format!("Failed to execute: {}", e),
-            duration_ms,
-        },
     }
 }
 

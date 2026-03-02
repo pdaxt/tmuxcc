@@ -160,10 +160,12 @@ pub fn save_auto_config(cfg: &AutoConfig) -> Result<()> {
 
 /// Generate a unique task ID (timestamp + random suffix to avoid collisions)
 fn gen_id() -> String {
+    use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
     let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
-    let rand_suffix: u32 = (ts as u32).wrapping_mul(2654435761); // Knuth hash for pseudo-random
-    format!("t{}_{:04x}", ts % 10_000_000, rand_suffix % 0xFFFF)
+    let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("t{}_{:04x}", ts % 10_000_000, seq % 0xFFFF)
 }
 
 /// Add a task to the queue

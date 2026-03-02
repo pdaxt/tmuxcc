@@ -287,3 +287,62 @@ fn test_board_summary() {
     assert_eq!(counts["in_progress"], 1);
     assert_eq!(counts["done"], 3);
 }
+
+#[test]
+fn test_factory_create_pipeline() {
+    // Clean queue
+    let home = std::env::var("HOME").unwrap_or_default();
+    let queue_path = format!("{}/.config/agentos/queue.json", home);
+    let _ = std::fs::write(&queue_path, r#"{"tasks":[]}"#);
+
+    // Create a pipeline using the "full" template
+    let result = agentos::factory::create_pipeline(
+        "agentos",
+        "Add user authentication with OAuth",
+        "full",
+        1,
+    );
+
+    match result {
+        Ok((pipeline_id, task_ids)) => {
+            assert!(pipeline_id.starts_with("pipe_"), "Pipeline ID should start with pipe_");
+            assert_eq!(task_ids.len(), 4, "Full template should create 4 tasks (dev, qa, security, review)");
+
+            // Verify queue has 4 tasks
+            let queue = agentos::queue::load_queue();
+            let pipeline_tasks: Vec<_> = queue.tasks.iter()
+                .filter(|t| t.pipeline_id.as_deref() == Some(&pipeline_id))
+                .collect();
+            assert_eq!(pipeline_tasks.len(), 4);
+
+            // Verify dependency chain
+            let dev = &pipeline_tasks[0];
+            let qa = &pipeline_tasks[1];
+            let security = &pipeline_tasks[2];
+            let review = &pipeline_tasks[3];
+
+            assert!(dev.depends_on.is_empty(), "Dev should have no deps");
+            assert_eq!(qa.depends_on, vec![dev.id.clone()], "QA depends on dev");
+            assert_eq!(security.depends_on, vec![dev.id.clone()], "Security depends on dev");
+            assert!(review.depends_on.contains(&qa.id), "Review depends on QA");
+            assert!(review.depends_on.contains(&security.id), "Review depends on Security");
+
+            // Verify roles
+            assert_eq!(dev.role, "developer");
+            assert_eq!(qa.role, "qa");
+            assert_eq!(security.role, "security");
+            assert_eq!(review.role, "reviewer");
+
+            // Verify prompts contain the task description
+            assert!(dev.prompt.contains("Add user authentication"));
+            assert!(qa.prompt.contains("Add user authentication"));
+
+            println!("Pipeline {} created with {} tasks", pipeline_id, task_ids.len());
+            println!("  Dev: {} (deps: {:?})", dev.id, dev.depends_on);
+            println!("  QA:  {} (deps: {:?})", qa.id, qa.depends_on);
+            println!("  Sec: {} (deps: {:?})", security.id, security.depends_on);
+            println!("  Rev: {} (deps: {:?})", review.id, review.depends_on);
+        }
+        Err(e) => panic!("Failed to create pipeline: {}", e),
+    }
+}
