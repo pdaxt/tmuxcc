@@ -22,7 +22,7 @@ const RESULT_DISMISS_SECS: u64 = 4;
 
 // ========== View Modes ==========
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ViewMode {
     Normal,
     Features,
