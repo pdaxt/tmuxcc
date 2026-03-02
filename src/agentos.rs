@@ -22,38 +22,66 @@ const DEFAULT_API_URL: &str = "http://localhost:3100";
 /// AgentOS pane state from the /api/status endpoint
 #[derive(Debug, Deserialize)]
 pub struct AgentOSPane {
+    #[serde(default)]
     pub pane: u8,
+    #[serde(default)]
     pub theme: String,
+    #[serde(default)]
     pub theme_color: String,
+    #[serde(default)]
     pub status: String,
+    #[serde(default)]
     pub project: String,
+    #[serde(default)]
     pub task: String,
+    #[serde(default)]
     pub role_full: String,
+    #[serde(default)]
     pub role: String,
+    #[serde(default)]
     pub branch: Option<String>,
+    #[serde(default)]
     pub workspace: Option<String>,
+    #[serde(default)]
     pub pty_active: bool,
+    #[serde(default)]
     pub pty_running: bool,
+    #[serde(default)]
     pub line_count: usize,
+    #[serde(default)]
     pub started_at: Option<String>,
+    #[serde(default)]
     pub acu: f64,
+    #[serde(default)]
     pub space: Option<String>,
+    #[serde(default)]
     pub issue_id: Option<String>,
 }
 
 /// AgentOS queue task from /api/queue endpoint
 #[derive(Debug, Clone, Deserialize)]
 pub struct AgentOSQueueTask {
+    #[serde(default)]
     pub id: String,
+    #[serde(default)]
     pub project: String,
+    #[serde(default)]
     pub role: String,
+    #[serde(default)]
     pub task: String,
+    #[serde(default)]
     pub priority: u8,
+    #[serde(default)]
     pub status: String,
+    #[serde(default)]
     pub pane: Option<u8>,
+    #[serde(default)]
     pub depends_on: Vec<String>,
+    #[serde(default)]
     pub added_at: String,
+    #[serde(default)]
     pub started_at: Option<String>,
+    #[serde(default)]
     pub completed_at: Option<String>,
 }
 
