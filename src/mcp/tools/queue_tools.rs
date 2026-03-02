@@ -402,8 +402,9 @@ pub async fn auto_cycle(app: &App) -> String {
                         }
                     }
 
-                    // Inject gate results for pipeline tasks
+                    // Pipeline-specific context: gate results + coordination
                     if let Some(ref pid) = task.pipeline_id {
+                        // Inject gate results
                         if let Some(gate) = crate::factory::get_gate_result(pid) {
                             let mut gate_lines = vec![format!(
                                 "Quality gate: {}", if gate.passed { "PASSED" } else { "FAILED" }
@@ -424,6 +425,12 @@ pub async fn auto_cycle(app: &App) -> String {
                                     if l.success { "PASS" } else { "WARN" }));
                             }
                             prompt = format!("{}\n\n## Quality Gate Results\n{}", prompt, gate_lines.join("\n"));
+                        }
+
+                        // Inject coordination context
+                        let coord = crate::factory::coordination_context(pid, pane, &task.role);
+                        if !coord.is_empty() {
+                            prompt = format!("{}\n\n{}", prompt, coord);
                         }
                     }
 

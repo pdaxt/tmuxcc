@@ -1585,6 +1585,15 @@ impl AgentOSService {
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
+    #[tool(description = "Scan for git conflicts in a factory pipeline's project: uncommitted changes, overlapping edits between pipeline agents.")]
+    async fn pipeline_conflict_scan(
+        &self,
+        Parameters(req): Parameters<types::FactoryStatusRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = tools::factory_tools::conflict_scan(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
+    }
+
     // === ORCHESTRATION ===
 
     #[tool(description = "Orchestrate: say what you want in natural language. AgentOS identifies the project, decomposes into dev + QA + security tasks, spawns agents on free panes, monitors to completion. The 'machine that builds machines' command.")]

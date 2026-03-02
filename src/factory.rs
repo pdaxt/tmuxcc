@@ -516,6 +516,128 @@ pub fn get_gate_result(pipeline_id: &str) -> Option<GateResult> {
 }
 
 // ============================================================
+// Pipeline Coordination
+// ============================================================
+
+/// Generate coordination instructions for an agent in a pipeline.
+/// This tells the agent about other agents working on the same pipeline,
+/// what files are locked, and how to communicate.
+pub fn coordination_context(pipeline_id: &str, pane: u8, role: &str) -> String {
+    let pipeline = match get_pipeline(pipeline_id) {
+        Some(p) => p,
+        None => return String::new(),
+    };
+
+    let mut lines = Vec::new();
+    lines.push(format!("## Pipeline Coordination ({})", pipeline_id));
+    lines.push(format!("You are the {} agent in pipeline '{}'.", role, pipeline.template));
+    lines.push(format!("Project: {}", pipeline.project));
+    lines.push(String::new());
+
+    // Show other agents in the pipeline
+    let other_stages: Vec<&StageView> = pipeline.stages.iter()
+        .filter(|s| s.pane != Some(pane))
+        .collect();
+
+    if !other_stages.is_empty() {
+        lines.push("### Other Agents in This Pipeline".to_string());
+        for stage in &other_stages {
+            let pane_str = stage.pane.map(|p| format!(" (pane {})", p)).unwrap_or_default();
+            lines.push(format!("- {} [{}]{}: {}", stage.name, stage.status, pane_str, stage.role));
+        }
+        lines.push(String::new());
+    }
+
+    // Coordination rules
+    lines.push("### Coordination Rules".to_string());
+    match role {
+        "developer" => {
+            lines.push("- You are the primary builder. QA and security agents will review your work.".to_string());
+            lines.push("- Use `lock_acquire` before editing critical files.".to_string());
+            lines.push("- Use `kb_add` to document key decisions, API contracts, and architecture choices.".to_string());
+            lines.push("- Commit with clear messages — QA/security agents will read your git log.".to_string());
+        }
+        "qa" => {
+            lines.push("- DO NOT modify the developer's code unless fixing a test.".to_string());
+            lines.push("- Check `kb_search` for architecture decisions before questioning implementation.".to_string());
+            lines.push("- Use `lock_acquire` before creating new test files.".to_string());
+            lines.push("- Report findings via `kb_add` category='qa_finding'.".to_string());
+            lines.push("- If you find bugs, create tracker issues, don't fix them yourself.".to_string());
+        }
+        "security" => {
+            lines.push("- DO NOT modify any code. Report only.".to_string());
+            lines.push("- Check `kb_search` for known decisions before flagging as vulnerability.".to_string());
+            lines.push("- Report findings via `kb_add` category='security_finding'.".to_string());
+            lines.push("- Create tracker issues for CRITICAL and HIGH severity findings.".to_string());
+            lines.push("- Classify severity: CRITICAL / HIGH / MEDIUM / LOW / INFO.".to_string());
+        }
+        "reviewer" => {
+            lines.push("- Review all KB entries from dev, QA, and security agents.".to_string());
+            lines.push("- Check git log for all changes in this pipeline.".to_string());
+            lines.push("- Create PR if not already done. Merge if all checks pass.".to_string());
+            lines.push("- If issues found, create tracker issues and mark pipeline as needs_review.".to_string());
+        }
+        _ => {}
+    }
+
+    // Coordination tools reminder
+    lines.push(String::new());
+    lines.push("### Available Coordination Tools".to_string());
+    lines.push("- `lock_acquire(files=[...])` — Lock files before editing".to_string());
+    lines.push("- `lock_release(files=[...])` — Release locks when done".to_string());
+    lines.push("- `lock_check(files=[...])` — Check if files are locked".to_string());
+    lines.push("- `kb_add(category, title, content)` — Share knowledge with other agents".to_string());
+    lines.push("- `kb_search(query)` — Find knowledge from other agents".to_string());
+    lines.push("- `msg_send(to_pane, message)` — Direct message another agent".to_string());
+    lines.push("- `conflict_scan()` — Check for git conflicts".to_string());
+
+    lines.join("\n")
+}
+
+/// Check for git conflicts between pipeline agents' branches.
+pub fn conflict_scan(pipeline_id: &str) -> serde_json::Value {
+    let pipeline = match get_pipeline(pipeline_id) {
+        Some(p) => p,
+        None => return serde_json::json!({"error": "pipeline not found"}),
+    };
+
+    let project_info = match scanner::project_by_name(&pipeline.project) {
+        Some(p) => p,
+        None => return serde_json::json!({"error": "project not in scanner"}),
+    };
+
+    // Check if any active stages have uncommitted changes that might conflict
+    let mut conflicts = Vec::new();
+    let output = std::process::Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(&project_info.path)
+        .output();
+
+    if let Ok(out) = output {
+        let status = String::from_utf8_lossy(&out.stdout);
+        let modified_files: Vec<&str> = status.lines()
+            .filter(|l| l.starts_with(" M") || l.starts_with("M ") || l.starts_with("MM"))
+            .map(|l| l[3..].trim())
+            .collect();
+
+        if !modified_files.is_empty() {
+            conflicts.push(serde_json::json!({
+                "type": "uncommitted_changes",
+                "files": modified_files,
+                "warning": "Multiple agents may be editing these files",
+            }));
+        }
+    }
+
+    serde_json::json!({
+        "pipeline_id": pipeline_id,
+        "project": pipeline.project,
+        "conflicts": conflicts,
+        "clean": conflicts.is_empty(),
+    })
+}
+
+// ============================================================
 // Tests
 // ============================================================
 

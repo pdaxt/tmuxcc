@@ -136,3 +136,11 @@ pub fn factory_list() -> String {
         }).collect::<Vec<_>>(),
     }).to_string()
 }
+
+/// Scan for conflicts in a pipeline's project.
+pub fn conflict_scan(req: &FactoryStatusRequest) -> String {
+    match &req.pipeline_id {
+        Some(pid) => factory::conflict_scan(pid).to_string(),
+        None => json_err("pipeline_id required for conflict scan"),
+    }
+}

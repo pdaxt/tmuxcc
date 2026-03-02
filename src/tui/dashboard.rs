@@ -152,6 +152,7 @@ pub struct PipelineSnapshot {
     pub template: String,
     pub status: String,
     pub stages: Vec<PipelineStageSnapshot>,
+    pub gate_passed: Option<bool>,
 }
 
 pub struct PipelineStageSnapshot {
@@ -821,6 +822,7 @@ fn collect_audit() -> AuditSnapshot {
 fn collect_pipelines() -> Vec<PipelineSnapshot> {
     use crate::factory;
     factory::list_pipelines().into_iter().map(|p| {
+        let gate_passed = factory::get_gate_result(&p.id).map(|g| g.passed);
         PipelineSnapshot {
             id: p.id,
             project: p.project,
@@ -833,6 +835,7 @@ fn collect_pipelines() -> Vec<PipelineSnapshot> {
                 status: s.status,
                 pane: s.pane,
             }).collect(),
+            gate_passed,
         }
     }).collect()
 }
@@ -2273,6 +2276,21 @@ fn render_pipeline_view(f: &mut Frame, area: Rect, data: &DashboardData) {
             }
         }
         lines.push(Line::from(stage_spans));
+
+        // Gate status
+        if let Some(passed) = pipe.gate_passed {
+            let (gate_icon, gate_color, gate_text) = if passed {
+                ("PASS", Color::Green, "build+test passed")
+            } else {
+                ("FAIL", Color::Red, "build or test failed")
+            };
+            stage_spans = vec![
+                Span::raw("  Gate: "),
+                Span::styled(gate_icon, Style::default().fg(gate_color).add_modifier(Modifier::BOLD)),
+                Span::styled(format!(" ({})", gate_text), Style::default().fg(Color::DarkGray)),
+            ];
+            lines.push(Line::from(stage_spans));
+        }
 
         // Description
         let desc = if pipe.description.len() > 80 {
