@@ -21,3 +21,4 @@ pub mod dashboard;
 pub mod engine;
 pub mod scanner;
 pub mod audit;
+pub mod factory;

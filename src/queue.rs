@@ -39,6 +39,9 @@ pub struct QueueTask {
     /// Tracker space for the linked issue
     #[serde(default)]
     pub space: Option<String>,
+    /// Pipeline ID this task belongs to (None = standalone task)
+    #[serde(default)]
+    pub pipeline_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -186,6 +189,7 @@ pub fn add_task(project: &str, role: &str, task: &str, prompt: &str, priority: u
         last_error: None,
         issue_id: None,
         space: None,
+        pipeline_id: None,
     };
 
     queue.tasks.push(new_task.clone());

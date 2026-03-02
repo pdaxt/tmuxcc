@@ -1548,6 +1548,34 @@ impl AgentOSService {
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
+    // === FACTORY (TRACKED PIPELINE) ===
+
+    #[tool(description = "Factory mode: natural language request → classifies project + intent → creates tracked dev+QA+security pipeline → monitors end-to-end. Returns factory_id to track progress. Use 'factory_status' to check pipeline state.")]
+    async fn factory_run(
+        &self,
+        Parameters(req): Parameters<types::FactoryRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = tools::factory_tools::factory_run(&self.app, req).await;
+        Ok(CallToolResult::success(vec![Content::text(result)]))
+    }
+
+    #[tool(description = "Get status of a factory pipeline run: stage, pane assignments, agent progress.")]
+    async fn factory_status(
+        &self,
+        Parameters(req): Parameters<types::FactoryStatusRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = tools::factory_tools::factory_status(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
+    }
+
+    #[tool(description = "List all factory pipeline runs: active, completed, and failed.")]
+    async fn factory_list(
+        &self,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = tools::factory_tools::factory_list();
+        Ok(CallToolResult::success(vec![Content::text(result)]))
+    }
+
     // === ORCHESTRATION ===
 
     #[tool(description = "Orchestrate: say what you want in natural language. AgentOS identifies the project, decomposes into dev + QA + security tasks, spawns agents on free panes, monitors to completion. The 'machine that builds machines' command.")]

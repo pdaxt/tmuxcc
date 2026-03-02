@@ -21,6 +21,7 @@ mod dashboard;
 mod engine;
 mod scanner;
 mod audit;
+mod factory;
 
 use std::sync::Arc;
 use clap::{Parser, Subcommand};

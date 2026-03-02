@@ -144,6 +144,23 @@ pub struct ActionLogEntry {
     pub summary: String,
 }
 
+/// Pipeline snapshot for factory view
+pub struct PipelineSnapshot {
+    pub id: String,
+    pub project: String,
+    pub description: String,
+    pub template: String,
+    pub status: String,
+    pub stages: Vec<PipelineStageSnapshot>,
+}
+
+pub struct PipelineStageSnapshot {
+    pub name: String,
+    pub role: String,
+    pub status: String,
+    pub pane: Option<u8>,
+}
+
 /// Full dashboard snapshot
 pub struct DashboardData {
     pub panes: Vec<PaneSnapshot>,
@@ -175,6 +192,7 @@ pub struct DashboardData {
     pub intel: IntelSnapshot,
     pub audit: AuditSnapshot,
     pub action_log: Vec<ActionLogEntry>,
+    pub pipelines: Vec<PipelineSnapshot>,
 }
 
 /// Collect all data in one pass (lock once, release)
@@ -339,6 +357,13 @@ pub fn collect_data(app: &App, selected: u8, view_mode: ViewMode, feature_cursor
         IntelSnapshot { kgraph_entities: 0, kgraph_edges: 0, kgraph_top: Vec::new(), facts: Vec::new(), fact_count: 0, replay_sessions: 0, replay_tool_calls: 0, replay_errors: 0, top_tools: Vec::new() }
     };
 
+    // Pipeline data
+    let pipelines = if view_mode == ViewMode::Pipeline {
+        collect_pipelines()
+    } else {
+        Vec::new()
+    };
+
     // Audit data — always collect (header badge needs it)
     let audit_data = collect_audit();
 
@@ -381,6 +406,7 @@ pub fn collect_data(app: &App, selected: u8, view_mode: ViewMode, feature_cursor
         intel,
         audit: audit_data,
         action_log: Vec::new(),
+        pipelines,
     }
 }
 
@@ -792,6 +818,25 @@ fn collect_audit() -> AuditSnapshot {
     AuditSnapshot { projects, total_critical, total_high, worst_grade }
 }
 
+fn collect_pipelines() -> Vec<PipelineSnapshot> {
+    use crate::factory;
+    factory::list_pipelines().into_iter().map(|p| {
+        PipelineSnapshot {
+            id: p.id,
+            project: p.project,
+            description: p.description,
+            template: p.template,
+            status: p.status,
+            stages: p.stages.into_iter().map(|s| PipelineStageSnapshot {
+                name: s.name,
+                role: s.role,
+                status: s.status,
+                pane: s.pane,
+            }).collect(),
+        }
+    }).collect()
+}
+
 /// Format ISO timestamp to relative time ("3m ago", "2h ago", "1d ago")
 fn format_relative_time(ts: &str) -> String {
     if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(ts, "%Y-%m-%dT%H:%M:%S%.fZ")
@@ -1046,6 +1091,24 @@ pub fn render(f: &mut Frame, data: &DashboardData) {
             render_action_log_view(f, chunks[2], data);
             render_help_bar(f, chunks[3], data);
         }
+        ViewMode::Pipeline => {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Length(alert_height),
+                    Constraint::Min(10),
+                    Constraint::Length(8),
+                    Constraint::Length(1),
+                ])
+                .split(f.area());
+
+            render_header(f, chunks[0], data);
+            if alert_height > 0 { render_alert_bar(f, chunks[1], data); }
+            render_pipeline_view(f, chunks[2], data);
+            render_queue(f, chunks[3], data);
+            render_help_bar(f, chunks[4], data);
+        }
         ViewMode::Normal => {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
@@ -1101,6 +1164,7 @@ fn render_header(f: &mut Frame, area: Rect, data: &DashboardData) {
         ViewMode::Intel => Span::styled(" INTEL ", Style::default().fg(Color::Black).bg(Color::Blue).add_modifier(Modifier::BOLD)),
         ViewMode::Audit => Span::styled(" AUDIT ", Style::default().fg(Color::Black).bg(Color::Red).add_modifier(Modifier::BOLD)),
         ViewMode::Log => Span::styled(" LOG ", Style::default().fg(Color::Black).bg(Color::White).add_modifier(Modifier::BOLD)),
+        ViewMode::Pipeline => Span::styled(" PIPE ", Style::default().fg(Color::Black).bg(Color::LightYellow).add_modifier(Modifier::BOLD)),
     };
 
     let header = Line::from(vec![
@@ -2090,6 +2154,8 @@ fn render_help_bar(f: &mut Frame, area: Rect, data: &DashboardData) {
             Span::styled("ealth ", Style::default().fg(Color::DarkGray)),
             Span::styled("[l]", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
             Span::styled("og ", Style::default().fg(Color::DarkGray)),
+            Span::styled("[y]", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled("pipe ", Style::default().fg(Color::DarkGray)),
             Span::styled("│ ", Style::default().fg(Color::DarkGray)),
             Span::styled("[1-9]", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
             Span::styled(" ", Style::default().fg(Color::DarkGray)),
@@ -2141,3 +2207,84 @@ fn render_action_log_view(f: &mut Frame, area: Rect, data: &DashboardData) {
     let paragraph = Paragraph::new(rows);
     f.render_widget(paragraph, inner);
 }
+
+fn render_pipeline_view(f: &mut Frame, area: Rect, data: &DashboardData) {
+    let block = Block::default()
+        .title(" Factory Pipelines ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if data.pipelines.is_empty() {
+        let empty = Paragraph::new("  No pipelines. Use :factory <request> or factory_run MCP tool to start one.")
+            .style(Style::default().fg(Color::DarkGray));
+        f.render_widget(empty, inner);
+        return;
+    }
+
+    let mut lines: Vec<Line> = Vec::new();
+    for pipe in &data.pipelines {
+        let status_color = match pipe.status.as_str() {
+            "running" => Color::Green,
+            "done" => Color::DarkGray,
+            "failed" => Color::Red,
+            _ => Color::Yellow,
+        };
+        lines.push(Line::from(vec![
+            Span::styled(&pipe.id, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::raw("  "),
+            Span::styled(&pipe.project, Style::default().fg(Color::White)),
+            Span::raw("  "),
+            Span::styled(
+                format!("[{}]", pipe.template),
+                Style::default().fg(Color::Magenta),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                pipe.status.to_uppercase(),
+                Style::default().fg(status_color).add_modifier(Modifier::BOLD),
+            ),
+        ]));
+
+        // Stage flow
+        let mut stage_spans: Vec<Span> = vec![Span::raw("  ")];
+        for (i, stage) in pipe.stages.iter().enumerate() {
+            if i > 0 {
+                stage_spans.push(Span::styled(" -> ", Style::default().fg(Color::DarkGray)));
+            }
+            let (icon, color) = match stage.status.as_str() {
+                "done" => ("+", Color::Green),
+                "running" => ("*", Color::Cyan),
+                "failed" => ("x", Color::Red),
+                _ => (".", Color::DarkGray),
+            };
+            stage_spans.push(Span::styled(icon, Style::default().fg(color)));
+            stage_spans.push(Span::styled(
+                &stage.name,
+                Style::default().fg(color),
+            ));
+            if let Some(pane) = stage.pane {
+                stage_spans.push(Span::styled(
+                    format!("({})", pane),
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+        }
+        lines.push(Line::from(stage_spans));
+
+        // Description
+        let desc = if pipe.description.len() > 80 {
+            format!("  {}...", &pipe.description[..77])
+        } else {
+            format!("  {}", pipe.description)
+        };
+        lines.push(Line::from(Span::styled(desc, Style::default().fg(Color::DarkGray))));
+        lines.push(Line::from(Span::raw("")));
+    }
+
+    let paragraph = Paragraph::new(lines).scroll((0, 0));
+    f.render_widget(paragraph, inner);
+}
+

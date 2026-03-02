@@ -39,6 +39,7 @@ pub mod quality_tools;
 pub mod dashboard_tools;
 pub mod scanner_tools;
 pub mod audit_tools;
+pub mod factory_tools;
 pub mod orchestrate;
 pub mod gateway_tools;
 

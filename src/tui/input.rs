@@ -25,6 +25,7 @@ pub enum FormKind {
     QueueAdd,
     FeatureCreate,
     Orchestrate,
+    FactoryGo,
 }
 
 /// Create a spawn form pre-filled with selected pane
@@ -195,6 +196,44 @@ pub fn form_to_command(form: &FormState) -> Option<TuiCommand> {
             let project = non_empty(&form.fields[1].value);
             Some(TuiCommand::Orchestrate { request, project })
         }
+        FormKind::FactoryGo => {
+            let project = non_empty(&form.fields[0].value);
+            let request = form.fields[1].value.trim().to_string();
+            let template = non_empty(&form.fields[2].value);
+            Some(TuiCommand::FactoryGo { project, request, template })
+        }
+    }
+}
+
+/// Create a factory-go form — project, description, template
+pub fn create_factory_form() -> FormState {
+    FormState {
+        title: "Factory Go".into(),
+        fields: vec![
+            FormField {
+                label: "Project".into(),
+                value: String::new(),
+                cursor: 0,
+                required: false,
+                placeholder: "auto-detected if empty".into(),
+            },
+            FormField {
+                label: "Request".into(),
+                value: String::new(),
+                cursor: 0,
+                required: true,
+                placeholder: "What to build (natural language)".into(),
+            },
+            FormField {
+                label: "Template".into(),
+                value: "full".into(),
+                cursor: 4,
+                required: false,
+                placeholder: "full / quick / secure".into(),
+            },
+        ],
+        focused: 0,
+        kind: FormKind::FactoryGo,
     }
 }
 
@@ -246,6 +285,40 @@ pub fn parse_command(input: &str) -> Option<TuiCommand> {
             return Some(TuiCommand::Orchestrate {
                 request: rest,
                 project: None,
+            });
+        }
+        // :go dataxlr8 add OAuth login
+        // :go dataxlr8 --quick fix login bug
+        // :go dataxlr8 --secure add payments
+        Some("go") if parts.len() >= 2 => {
+            let rest = if parts.len() == 3 {
+                format!("{} {}", parts[1], parts[2])
+            } else {
+                parts[1].to_string()
+            };
+            // First word is project, rest is description. Check for --template flags.
+            let words: Vec<&str> = rest.splitn(2, ' ').collect();
+            let project = words[0].to_string();
+            let desc_raw = words.get(1).unwrap_or(&"").to_string();
+
+            let (template, description) = if desc_raw.starts_with("--quick ") {
+                (Some("quick".to_string()), desc_raw[8..].to_string())
+            } else if desc_raw.starts_with("--secure ") {
+                (Some("secure".to_string()), desc_raw[9..].to_string())
+            } else if desc_raw.starts_with("--full ") {
+                (Some("full".to_string()), desc_raw[7..].to_string())
+            } else {
+                (None, desc_raw)
+            };
+
+            if description.is_empty() {
+                return None; // need at least project + description
+            }
+
+            return Some(TuiCommand::FactoryGo {
+                project: Some(project),
+                request: description,
+                template,
             });
         }
         Some("qf") if parts.len() >= 3 => {

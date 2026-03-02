@@ -35,6 +35,7 @@ pub enum ViewMode {
     Intel,
     Audit,
     Log,
+    Pipeline,
 }
 
 // ========== TUI Mode (State Machine) ==========
@@ -102,6 +103,11 @@ pub enum TuiCommand {
     Orchestrate {
         request: String,
         project: Option<String>,
+    },
+    FactoryGo {
+        project: Option<String>,
+        request: String,
+        template: Option<String>,
     },
 }
 
@@ -242,6 +248,17 @@ async fn execute_command(app: &App, cmd: TuiCommand) -> TuiResult {
                 concurrent_qa: Some(true),
                 concurrent_security: Some(false),
                 max_panes: None,
+            }).await;
+            let success = !result.contains("\"error\"");
+            TuiResult { description: desc, success, message: result }
+        }
+        TuiCommand::FactoryGo { project, request, template } => {
+            let desc = format!("Factory: {}", &request.chars().take(30).collect::<String>());
+            let result = tools::factory_tools::factory_run(app, types::FactoryRequest {
+                request,
+                project,
+                template,
+                priority: None,
             }).await;
             let success = !result.contains("\"error\"");
             TuiResult { description: desc, success, message: result }
@@ -411,6 +428,11 @@ fn handle_navigate(
             *mode = TuiMode::Input { form: input::create_queue_form() };
         }
 
+        // Factory form
+        KeyCode::Char('w') => {
+            *mode = TuiMode::Input { form: input::create_factory_form() };
+        }
+
         // Orchestrate form — natural language → full pipeline
         KeyCode::Char('o') => {
             *mode = TuiMode::Input { form: input::create_orchestrate_form() };
@@ -467,6 +489,9 @@ fn handle_navigate(
         }
         KeyCode::Char('l') => {
             *view_mode = if *view_mode == ViewMode::Log { ViewMode::Normal } else { ViewMode::Log };
+        }
+        KeyCode::Char('y') => {
+            *view_mode = if *view_mode == ViewMode::Pipeline { ViewMode::Normal } else { ViewMode::Pipeline };
         }
 
         // Pane selection

@@ -1661,6 +1661,26 @@ pub struct OrchestrateRequest {
     pub max_panes: Option<u8>,
 }
 
+// === FACTORY TYPES ===
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FactoryRequest {
+    #[schemars(description = "What to build/fix/test (natural language). Project auto-detected if not specified.")]
+    pub request: String,
+    #[schemars(description = "Project name (optional — auto-detected from request text if omitted)")]
+    pub project: Option<String>,
+    #[schemars(description = "Pipeline template: full, quick, secure (default: full)")]
+    pub template: Option<String>,
+    #[schemars(description = "Priority 1-5 (default: 1)")]
+    pub priority: Option<u8>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FactoryStatusRequest {
+    #[schemars(description = "Pipeline ID (omit to list all pipelines)")]
+    pub pipeline_id: Option<String>,
+}
+
 // === GATEWAY TYPES ===
 
 #[derive(Debug, Deserialize, JsonSchema)]

@@ -647,6 +647,11 @@ pub async fn dispatch_mcp_tool(app: &App, tool: &str, args: Value) -> String {
         "audit_deps" => { let r = deser!(args, AuditDepsRequest); crate::audit::audit_deps(&r.project).to_string() }
         "audit_full" => { let r = deser!(args, AuditFullRequest); crate::audit::audit_full(&r.project).to_string() }
 
+        // === FACTORY ===
+        "factory" | "factory_run" | "factory_go" | "go" | "work" => tools::factory_tools::factory_run(app, deser!(args, FactoryRequest)).await,
+        "factory_status" | "pipeline" | "pipe" => tools::factory_tools::factory_status(&deser!(args, FactoryStatusRequest)),
+        "factory_list" | "pipelines" => tools::factory_tools::factory_list(),
+
         // === ORCHESTRATION ===
         "orchestrate" => tools::orchestrate::orchestrate(app, deser!(args, OrchestrateRequest)).await,
 
@@ -869,6 +874,11 @@ pub const MCP_TOOLS: &[(&str, &str)] = &[
     ("audit_intent", "Intent verification"),
     ("audit_deps", "Dependency audit"),
     ("audit_full", "Full audit"),
+    // Factory
+    ("go", "Factory: NL → dev+qa+sec pipeline"),
+    ("factory", "Factory: NL → pipeline"),
+    ("pipeline", "Pipeline status"),
+    ("pipelines", "List all pipelines"),
     // Orchestration
     ("orchestrate", "Auto-build: NL → agents"),
     // Gateway (micro MCPs)
