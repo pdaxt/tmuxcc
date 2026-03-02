@@ -173,9 +173,9 @@ pub fn parse_command(input: &str) -> Option<TuiCommand> {
     let parts: Vec<&str> = input.splitn(3, ' ').collect();
     let cmd_lower = parts.first().map(|s| s.to_lowercase());
 
-    // Fast-path shorthands
+    // Built-in commands (full names + shorthands)
     match cmd_lower.as_deref() {
-        Some("s") if parts.len() >= 3 => {
+        Some("spawn" | "s") if parts.len() >= 3 => {
             return Some(TuiCommand::Spawn {
                 pane: parts[1].to_string(),
                 project: parts[2].to_string(),
@@ -183,19 +183,19 @@ pub fn parse_command(input: &str) -> Option<TuiCommand> {
                 task: None,
             });
         }
-        Some("k") if parts.len() >= 2 => {
+        Some("kill" | "k") if parts.len() >= 2 => {
             return Some(TuiCommand::Kill {
                 pane: parts[1].to_string(),
                 reason: parts.get(2).map(|s| s.to_string()),
             });
         }
-        Some("done") if parts.len() >= 2 => {
+        Some("complete" | "done") if parts.len() >= 2 => {
             return Some(TuiCommand::Complete {
                 pane: parts[1].to_string(),
                 summary: parts.get(2).map(|s| s.to_string()),
             });
         }
-        Some("cycle") => {
+        Some("auto" | "cycle") => {
             return Some(TuiCommand::AutoCycle);
         }
         Some("feat") if parts.len() >= 3 => {

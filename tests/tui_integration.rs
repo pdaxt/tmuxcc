@@ -93,10 +93,12 @@ fn test_parse_auto_cycle() {
 #[test]
 fn test_parse_invalid_commands() {
     assert!(input::parse_command("").is_none());
-    assert!(input::parse_command("invalid").is_none());
-    assert!(input::parse_command("spawn").is_none()); // Missing args
-    assert!(input::parse_command("spawn 3").is_none()); // Missing project
-    assert!(input::parse_command("kill").is_none()); // Missing pane
+    // "invalid" now routes to McpDispatch (universal dispatch)
+    assert!(matches!(input::parse_command("invalid"), Some(TuiCommand::McpDispatch { .. })));
+    // spawn/kill without enough args also route to McpDispatch
+    assert!(matches!(input::parse_command("spawn"), Some(TuiCommand::McpDispatch { .. })));
+    assert!(matches!(input::parse_command("spawn 3"), Some(TuiCommand::McpDispatch { .. })));
+    assert!(matches!(input::parse_command("kill"), Some(TuiCommand::McpDispatch { .. })));
 }
 
 #[test]
@@ -349,9 +351,11 @@ fn test_mode_command_transition() {
     let mode = TuiMode::Command {
         input: "spawn".into(),
         cursor: 5,
+        completions: Vec::new(),
+        comp_idx: None,
     };
     match &mode {
-        TuiMode::Command { input, cursor } => {
+        TuiMode::Command { input, cursor, .. } => {
             assert_eq!(input, "spawn");
             assert_eq!(*cursor, 5);
         }
