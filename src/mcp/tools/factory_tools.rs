@@ -76,6 +76,34 @@ pub fn factory_status(req: &FactoryStatusRequest) -> String {
     }
 }
 
+/// Run quality gates on a pipeline (build, test, lint).
+pub fn factory_gate(req: &FactoryStatusRequest) -> String {
+    let pid = match &req.pipeline_id {
+        Some(pid) => pid.clone(),
+        None => return json_err("pipeline_id required for gate check"),
+    };
+    match factory::run_gate(&pid) {
+        Ok(gate) => serde_json::json!({
+            "pipeline_id": gate.pipeline_id,
+            "project": gate.project,
+            "passed": gate.passed,
+            "build": gate.build.as_ref().map(|c| serde_json::json!({
+                "command": c.command, "success": c.success,
+                "duration_ms": c.duration_ms, "output": truncate(&c.output, 200),
+            })),
+            "test": gate.test.as_ref().map(|c| serde_json::json!({
+                "command": c.command, "success": c.success,
+                "duration_ms": c.duration_ms, "output": truncate(&c.output, 200),
+            })),
+            "lint": gate.lint.as_ref().map(|c| serde_json::json!({
+                "command": c.command, "success": c.success,
+                "duration_ms": c.duration_ms, "output": truncate(&c.output, 200),
+            })),
+        }).to_string(),
+        Err(e) => json_err(&e.to_string()),
+    }
+}
+
 /// List all pipelines.
 pub fn factory_list() -> String {
     let pipelines = factory::list_pipelines();

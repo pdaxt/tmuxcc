@@ -401,6 +401,121 @@ pub fn detect_project(description: &str) -> Option<(String, f32)> {
 }
 
 // ============================================================
+// Quality Gates
+// ============================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GateResult {
+    pub pipeline_id: String,
+    pub project: String,
+    pub build: Option<GateCheck>,
+    pub test: Option<GateCheck>,
+    pub lint: Option<GateCheck>,
+    pub passed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GateCheck {
+    pub command: String,
+    pub success: bool,
+    pub output: String,
+    pub duration_ms: u64,
+}
+
+/// Run quality gates for a pipeline's project.
+/// Executes build, test, and lint commands (if configured in scanner).
+/// Returns results so auto_cycle can decide whether to proceed.
+pub fn run_gate(pipeline_id: &str) -> Result<GateResult> {
+    let pipeline = get_pipeline(pipeline_id)
+        .ok_or_else(|| anyhow::anyhow!("Pipeline '{}' not found", pipeline_id))?;
+
+    let project_info = scanner::project_by_name(&pipeline.project)
+        .ok_or_else(|| anyhow::anyhow!("Project '{}' not found in scanner", pipeline.project))?;
+
+    let project_path = &project_info.path;
+    let mut result = GateResult {
+        pipeline_id: pipeline_id.to_string(),
+        project: pipeline.project.clone(),
+        build: None,
+        test: None,
+        lint: None,
+        passed: true,
+    };
+
+    // Run build check
+    if let Some(ref cmd) = project_info.build_cmd {
+        let check = run_check(project_path, cmd);
+        if !check.success { result.passed = false; }
+        result.build = Some(check);
+    }
+
+    // Run test check
+    if let Some(ref cmd) = project_info.test_cmd {
+        let check = run_check(project_path, cmd);
+        if !check.success { result.passed = false; }
+        result.test = Some(check);
+    }
+
+    // Run lint check
+    if let Some(ref cmd) = project_info.lint_cmd {
+        let check = run_check(project_path, cmd);
+        // Lint failures are warnings, don't fail the gate
+        result.lint = Some(check);
+    }
+
+    // Save gate result
+    let gate_path = std::path::PathBuf::from(
+        crate::config::agentos_root().join("gates")
+    );
+    let _ = std::fs::create_dir_all(&gate_path);
+    let gate_file = gate_path.join(format!("{}.json", pipeline_id));
+    let _ = std::fs::write(&gate_file, serde_json::to_string_pretty(&result).unwrap_or_default());
+
+    Ok(result)
+}
+
+/// Run a single command in a project directory, capturing output and timing.
+fn run_check(project_path: &str, command: &str) -> GateCheck {
+    let start = std::time::Instant::now();
+    let output = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .current_dir(project_path)
+        .output();
+
+    let duration_ms = start.elapsed().as_millis() as u64;
+
+    match output {
+        Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let combined: String = format!("{}{}", stdout, stderr).chars().take(2000).collect();
+            GateCheck {
+                command: command.to_string(),
+                success: out.status.success(),
+                output: combined,
+                duration_ms,
+            }
+        }
+        Err(e) => GateCheck {
+            command: command.to_string(),
+            success: false,
+            output: format!("Failed to execute: {}", e),
+            duration_ms,
+        },
+    }
+}
+
+/// Get the most recent gate result for a pipeline.
+pub fn get_gate_result(pipeline_id: &str) -> Option<GateResult> {
+    let gate_file = crate::config::agentos_root()
+        .join("gates")
+        .join(format!("{}.json", pipeline_id));
+    let data = std::fs::read_to_string(&gate_file).ok()?;
+    serde_json::from_str(&data).ok()
+}
+
+// ============================================================
 // Tests
 // ============================================================
 

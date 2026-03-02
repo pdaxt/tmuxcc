@@ -1576,6 +1576,15 @@ impl AgentOSService {
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
+    #[tool(description = "Run quality gates (build, test, lint) on a factory pipeline. Returns pass/fail for each check. Auto-runs after dev stage completes.")]
+    async fn factory_gate(
+        &self,
+        Parameters(req): Parameters<types::FactoryStatusRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = tools::factory_tools::factory_gate(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
+    }
+
     // === ORCHESTRATION ===
 
     #[tool(description = "Orchestrate: say what you want in natural language. AgentOS identifies the project, decomposes into dev + QA + security tasks, spawns agents on free panes, monitors to completion. The 'machine that builds machines' command.")]

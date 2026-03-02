@@ -241,6 +241,30 @@ pub async fn auto_cycle(app: &App) -> String {
                 if let Some(qt) = queue::task_for_pane(i) {
                     let _ = queue::mark_done(&qt.id, &result);
 
+                    // Quality gate: if this task belongs to a pipeline dev stage, run checks
+                    if let Some(ref pid) = qt.pipeline_id {
+                        if qt.role == "developer" {
+                            match crate::factory::run_gate(pid) {
+                                Ok(gate) => {
+                                    actions.push(serde_json::json!({
+                                        "action": "quality_gate",
+                                        "pipeline_id": pid,
+                                        "passed": gate.passed,
+                                        "build": gate.build.as_ref().map(|c| c.success),
+                                        "test": gate.test.as_ref().map(|c| c.success),
+                                    }));
+                                }
+                                Err(e) => {
+                                    actions.push(serde_json::json!({
+                                        "action": "quality_gate_error",
+                                        "pipeline_id": pid,
+                                        "error": e.to_string(),
+                                    }));
+                                }
+                            }
+                        }
+                    }
+
                     if let (Some(issue_id), Some(space)) = (&qt.issue_id, &qt.space) {
                         let _ = tracker::issue_update_full(
                             space, issue_id, "done", "", "", "", "", "",
