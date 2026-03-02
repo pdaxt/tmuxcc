@@ -197,7 +197,7 @@ impl AgentOSClient {
             client: reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(2))
                 .build()
-                .unwrap_or_default(),
+                .expect("failed to create HTTP client"),
         }
     }
 

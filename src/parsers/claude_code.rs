@@ -47,41 +47,41 @@ impl ClaudeCodeParser {
             // Claude Code uses formats like: "Yes / No", "(Y)es / (N)o", "[y/n]", "y/n"
             file_edit_pattern: Regex::new(
                 r"(?i)(Edit|Write|Modify)\s+.*?\?|Do you want to (edit|write|modify)|Allow.*?edit"
-            ).unwrap(),
+            ).expect("invalid regex"),
             file_create_pattern: Regex::new(
                 r"(?i)Create\s+.*?\?|Do you want to create|Allow.*?create"
-            ).unwrap(),
+            ).expect("invalid regex"),
             file_delete_pattern: Regex::new(
                 r"(?i)Delete\s+.*?\?|Do you want to delete|Allow.*?delete"
-            ).unwrap(),
+            ).expect("invalid regex"),
             bash_pattern: Regex::new(
                 r"(?i)(Run|Execute)\s+(command|bash|shell)|Do you want to run|Allow.*?(command|bash)|run this command"
-            ).unwrap(),
+            ).expect("invalid regex"),
             mcp_pattern: Regex::new(
                 r"(?i)MCP\s+tool|Do you want to use.*?MCP|Allow.*?MCP"
-            ).unwrap(),
+            ).expect("invalid regex"),
             general_approval_pattern: Regex::new(
                 r"(?i)\[y/n\]|\[Y/n\]|\[yes/no\]|\(Y\)es\s*/\s*\(N\)o|Yes\s*/\s*No|y/n|Allow\?|Do you want to (allow|proceed|continue|run|execute)"
-            ).unwrap(),
+            ).expect("invalid regex"),
 
             // Subagent patterns for Claude Code's Task tool
             // Match: ⏺ Task(...subagent_type="Explore"...description="..."...)
             task_start_pattern: Regex::new(
                 r#"(?m)[⏺⠿⠇⠋⠙⠸⠴⠦⠧⠖⠏]\s*Task\s*\([^)]*subagent_type\s*[:=]\s*["']?(\w[\w-]*)["']?[^)]*description\s*[:=]\s*["']([^"']+)["']"#
-            ).unwrap(),
+            ).expect("invalid regex"),
             // Match running spinner indicators with agent type
             task_running_pattern: Regex::new(
                 r"(?m)^[^│]*[▶►⠿⠇⠋⠙⠸⠴⠦⠧⠖⠏]\s*(\w+)(?:\s*agent)?:?\s*(.*)$"
-            ).unwrap(),
+            ).expect("invalid regex"),
             // Match completed indicators
             task_complete_pattern: Regex::new(
                 r"(?m)[✓✔]\s*(\w+).*?(?:completed|finished|done|returned)"
-            ).unwrap(),
+            ).expect("invalid regex"),
 
             // Context remaining pattern (e.g., "Context left until auto-compact: 42%")
             context_pattern: Regex::new(
                 r"(?i)Context\s+(?:left|remaining).*?(\d+)%"
-            ).unwrap(),
+            ).expect("invalid regex"),
         }
     }
 
@@ -521,7 +521,7 @@ mod tests {
             AgentStatus::AwaitingApproval { approval_type, .. } => {
                 assert_eq!(approval_type, ApprovalType::FileEdit);
             }
-            _ => panic!("Expected AwaitingApproval status"),
+            other => panic!("Expected AwaitingApproval, got {:?}", other),
         }
     }
 

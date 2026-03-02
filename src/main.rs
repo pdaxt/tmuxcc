@@ -86,7 +86,11 @@ async fn main() -> Result<()> {
 
     // Setup logging
     if cli.debug {
-        let log_file = std::fs::File::create("agentos-tui.log")?;
+        let log_dir = dirs::cache_dir()
+            .unwrap_or_else(|| PathBuf::from("/tmp"))
+            .join("agentos-tui");
+        let _ = std::fs::create_dir_all(&log_dir);
+        let log_file = std::fs::File::create(log_dir.join("debug.log"))?;
         let file_layer = tracing_subscriber::fmt::layer()
             .with_writer(log_file)
             .with_ansi(false);

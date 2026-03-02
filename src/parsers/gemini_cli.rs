@@ -14,10 +14,10 @@ pub struct GeminiCliParser {
 impl GeminiCliParser {
     pub fn new() -> Self {
         Self {
-            approval_pattern: Regex::new(r"(?i)\[y/n\]|\[yes/no\]|confirm|approve|allow").unwrap(),
+            approval_pattern: Regex::new(r"(?i)\[y/n\]|\[yes/no\]|confirm|approve|allow").expect("invalid regex"),
             processing_pattern: Regex::new(r"(?i)(thinking|generating|processing|analyzing)")
-                .unwrap(),
-            idle_pattern: Regex::new(r"(?i)(ready|waiting|>\s*$)").unwrap(),
+                .expect("invalid regex"),
+            idle_pattern: Regex::new(r"(?i)(ready|waiting|>\s*$)").expect("invalid regex"),
         }
     }
 }

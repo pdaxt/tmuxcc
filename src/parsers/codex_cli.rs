@@ -15,9 +15,9 @@ impl CodexCliParser {
     pub fn new() -> Self {
         Self {
             approval_pattern: Regex::new(r"(?i)\[y/n\]|\[yes/no\]|confirm|approve|run this")
-                .unwrap(),
-            processing_pattern: Regex::new(r"(?i)(thinking|running|executing|generating)").unwrap(),
-            idle_pattern: Regex::new(r"(?i)(ready|waiting|>\s*$|\$\s*$)").unwrap(),
+                .expect("invalid regex"),
+            processing_pattern: Regex::new(r"(?i)(thinking|running|executing|generating)").expect("invalid regex"),
+            idle_pattern: Regex::new(r"(?i)(ready|waiting|>\s*$|\$\s*$)").expect("invalid regex"),
         }
     }
 }

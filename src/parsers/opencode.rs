@@ -14,12 +14,12 @@ pub struct OpenCodeParser {
 impl OpenCodeParser {
     pub fn new() -> Self {
         Self {
-            approval_pattern: Regex::new(r"(?i)\[y/n\]|\[yes/no\]|confirm|approve|allow").unwrap(),
+            approval_pattern: Regex::new(r"(?i)\[y/n\]|\[yes/no\]|confirm|approve|allow").expect("invalid regex"),
             processing_pattern: Regex::new(
                 r"(?i)(thinking|processing|generating|analyzing|working)",
             )
-            .unwrap(),
-            idle_pattern: Regex::new(r"(?i)(ready|waiting|idle|>\s*$)").unwrap(),
+            .expect("invalid regex"),
+            idle_pattern: Regex::new(r"(?i)(ready|waiting|idle|>\s*$)").expect("invalid regex"),
         }
     }
 }
