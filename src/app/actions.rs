@@ -71,6 +71,14 @@ pub enum Action {
     ToggleQueue,
     /// Toggle dashboard panel visibility
     ToggleDashboard,
+    /// Toggle factory pipeline panel visibility
+    ToggleFactory,
+    /// Enter factory command bar mode
+    EnterCommandBar,
+    /// Submit factory command
+    SubmitFactory,
+    /// Cancel command bar
+    CancelCommandBar,
     /// Scroll preview up
     PreviewScrollUp,
     /// Scroll preview down
@@ -120,6 +128,10 @@ impl Action {
             Action::ScrollDown => "Scroll down",
             Action::ToggleQueue => "Toggle queue panel",
             Action::ToggleDashboard => "Toggle dashboard panel",
+            Action::ToggleFactory => "Toggle factory panel",
+            Action::EnterCommandBar => "Enter factory command bar",
+            Action::SubmitFactory => "Submit factory request",
+            Action::CancelCommandBar => "Cancel command bar",
             Action::PreviewScrollUp => "Scroll preview up",
             Action::PreviewScrollDown => "Scroll preview down",
             Action::PreviewScrollBottom => "Scroll to bottom",

@@ -85,6 +85,69 @@ pub struct AgentOSQueueTask {
     pub completed_at: Option<String>,
 }
 
+/// Factory pipeline request from /api/factory/status
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct FactoryRequest {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub request: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub classification: FactoryClassification,
+    #[serde(default)]
+    pub tasks: Vec<FactoryTask>,
+    #[serde(default)]
+    pub created_at: String,
+}
+
+/// Classification result for a factory request
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct FactoryClassification {
+    #[serde(default)]
+    pub project: String,
+    #[serde(default)]
+    pub role: String,
+    #[serde(rename = "type", default)]
+    pub req_type: String,
+}
+
+/// A single task in a factory pipeline
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct FactoryTask {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub stage: String,
+    #[serde(default)]
+    pub role: String,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub pane: Option<u8>,
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+}
+
+/// Factory inbox from /api/factory/status
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct FactoryInbox {
+    #[serde(default)]
+    pub requests: Vec<FactoryRequest>,
+}
+
+/// Factory submit response
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct FactorySubmitResponse {
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub factory_id: String,
+    #[serde(default)]
+    pub message: String,
+}
+
 /// 24h daily digest from /api/analytics/digest
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct AnalyticsDigest {
@@ -393,6 +456,28 @@ impl AgentOSClient {
             days_left,
             ended,
         })
+    }
+
+    /// Submit a factory request
+    pub async fn submit_factory(&self, request: &str) -> anyhow::Result<FactorySubmitResponse> {
+        let url = format!("{}/api/factory/submit", self.api_url);
+        let body = serde_json::json!({ "request": request });
+        let resp: FactorySubmitResponse = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await?
+            .json()
+            .await?;
+        Ok(resp)
+    }
+
+    /// Fetch factory pipeline status
+    pub async fn fetch_factory_status(&self) -> anyhow::Result<Vec<FactoryRequest>> {
+        let url = format!("{}/api/factory/status", self.api_url);
+        let resp: FactoryInbox = self.client.get(&url).send().await?.json().await?;
+        Ok(resp.requests)
     }
 
     /// Convert AgentOS pane to MonitoredAgent

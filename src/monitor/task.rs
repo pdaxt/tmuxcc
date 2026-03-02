@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{debug, error, warn};
 
-use crate::agentos::{AgentOSClient, AgentOSQueueTask, AlertsResponse, AnalyticsDigest};
+use crate::agentos::{AgentOSClient, AgentOSQueueTask, AlertsResponse, AnalyticsDigest, FactoryRequest};
 use crate::agents::{AgentStatus, MonitoredAgent};
 use crate::app::AgentTree;
 use crate::parsers::ParserRegistry;
@@ -14,6 +14,12 @@ use crate::tmux::{refresh_process_cache, TmuxClient};
 
 /// Hysteresis duration - keep "Processing" status for this long after last active detection
 const STATUS_HYSTERESIS_MS: u64 = 2000;
+
+/// Command sent from TUI to monitor for async execution
+#[derive(Debug)]
+pub enum FactoryCommand {
+    Submit { request: String },
+}
 
 /// Update message sent from monitor to UI
 #[derive(Debug, Clone)]
@@ -29,6 +35,8 @@ pub struct MonitorUpdate {
     pub alerts: Option<AlertsResponse>,
     /// Dashboard data (fetched on slow cadence via /api/dashboard)
     pub dashboard: Option<DashboardData>,
+    /// Factory pipeline requests (fetched on slow cadence)
+    pub factory_requests: Option<Vec<FactoryRequest>>,
 }
 
 /// Background task that monitors tmux panes and AgentOS for AI agents
@@ -37,6 +45,7 @@ pub struct MonitorTask {
     parser_registry: Arc<ParserRegistry>,
     agentos_client: Option<AgentOSClient>,
     tx: mpsc::Sender<MonitorUpdate>,
+    factory_rx: mpsc::Receiver<FactoryCommand>,
     poll_interval: Duration,
     /// Track when each agent was last seen as "active" (Processing/AwaitingApproval)
     /// Key: agent target string
@@ -55,6 +64,7 @@ impl MonitorTask {
         parser_registry: Arc<ParserRegistry>,
         agentos_client: Option<AgentOSClient>,
         tx: mpsc::Sender<MonitorUpdate>,
+        factory_rx: mpsc::Receiver<FactoryCommand>,
         poll_interval: Duration,
     ) -> Self {
         Self {
@@ -62,6 +72,7 @@ impl MonitorTask {
             parser_registry,
             agentos_client,
             tx,
+            factory_rx,
             poll_interval,
             last_active: HashMap::new(),
             api_fail_count: 0,
@@ -73,6 +84,32 @@ impl MonitorTask {
     /// Runs the monitoring loop
     pub async fn run(mut self) {
         loop {
+            // Process any pending factory commands (non-blocking drain)
+            let mut flash_from_factory: Option<String> = None;
+            while let Ok(cmd) = self.factory_rx.try_recv() {
+                match cmd {
+                    FactoryCommand::Submit { request } => {
+                        if let Some(ref client) = self.agentos_client {
+                            match client.submit_factory(&request).await {
+                                Ok(resp) => {
+                                    flash_from_factory = Some(format!(
+                                        "Factory: {} ({})",
+                                        resp.message, resp.factory_id
+                                    ));
+                                }
+                                Err(e) => {
+                                    flash_from_factory =
+                                        Some(format!("Factory error: {}", e));
+                                }
+                            }
+                        } else {
+                            flash_from_factory =
+                                Some("Factory: AgentOS not connected".to_string());
+                        }
+                    }
+                }
+            }
+
             let (tree, queue_tasks, connected) = match self.poll_all().await {
                 Ok(result) => result,
                 Err(e) => {
@@ -82,7 +119,9 @@ impl MonitorTask {
             };
 
             // Detect connection state transitions
-            let flash = if connected && !self.was_connected {
+            let flash = if let Some(msg) = flash_from_factory {
+                Some(msg)
+            } else if connected && !self.was_connected {
                 self.api_fail_count = 0;
                 Some("AgentOS connected".to_string())
             } else if !connected && self.was_connected {
@@ -92,11 +131,12 @@ impl MonitorTask {
             };
             self.was_connected = connected;
 
-            // Fetch dashboard + analytics on slow cadence (~5s at 500ms poll = every 10th poll)
+            // Fetch dashboard + analytics + factory on slow cadence (~5s at 500ms poll = every 10th poll)
             self.analytics_counter += 1;
             let mut digest = None;
             let mut alerts = None;
             let mut dashboard = None;
+            let mut factory_requests = None;
             if connected && self.analytics_counter % 10 == 0 {
                 if let Some(ref client) = self.agentos_client {
                     // Single /api/dashboard call returns everything including digest + alerts
@@ -110,6 +150,15 @@ impl MonitorTask {
                             debug!("Dashboard fetch failed: {}", e);
                         }
                     }
+                    // Fetch factory pipeline status
+                    match client.fetch_factory_status().await {
+                        Ok(reqs) => {
+                            factory_requests = Some(reqs);
+                        }
+                        Err(e) => {
+                            debug!("Factory status fetch failed: {}", e);
+                        }
+                    }
                 }
             }
 
@@ -121,6 +170,7 @@ impl MonitorTask {
                 digest,
                 alerts,
                 dashboard,
+                factory_requests,
             };
             if self.tx.send(update).await.is_err() {
                 debug!("Monitor channel closed, stopping");

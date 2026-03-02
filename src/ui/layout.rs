@@ -16,16 +16,28 @@ impl Layout {
 
     /// Creates the main layout with all optional panels
     pub fn main_layout_full(area: Rect, show_queue: bool, show_dashboard: bool) -> Vec<Rect> {
+        Self::main_layout_all(area, show_queue, show_dashboard, false)
+    }
+
+    /// Creates the main layout with all optional panels including factory
+    pub fn main_layout_all(
+        area: Rect,
+        show_queue: bool,
+        show_dashboard: bool,
+        show_factory: bool,
+    ) -> Vec<Rect> {
         let queue_height = if show_queue { 8 } else { 0 };
         let dashboard_height = if show_dashboard { 12 } else { 0 };
+        let factory_height = if show_factory { 10 } else { 0 };
         ratatui::layout::Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),                // Header
-                Constraint::Min(10),                  // Content area (agents + preview)
-                Constraint::Length(queue_height),      // Queue panel
-                Constraint::Length(dashboard_height),  // Dashboard panel
-                Constraint::Length(1),                 // Footer
+                Constraint::Length(3),                 // Header
+                Constraint::Min(10),                   // Content area (agents + preview)
+                Constraint::Length(queue_height),       // Queue panel
+                Constraint::Length(dashboard_height),   // Dashboard panel
+                Constraint::Length(factory_height),     // Factory panel
+                Constraint::Length(1),                  // Footer
             ])
             .split(area)
             .to_vec()

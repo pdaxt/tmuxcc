@@ -1,5 +1,6 @@
 mod agent_tree;
 mod dashboard_panel;
+mod factory_panel;
 mod footer;
 mod header;
 mod help;
@@ -10,6 +11,7 @@ mod subagent_log;
 
 pub use agent_tree::AgentTreeWidget;
 pub use dashboard_panel::DashboardWidget;
+pub use factory_panel::FactoryPanelWidget;
 pub use footer::{FooterButton, FooterWidget};
 pub use header::HeaderWidget;
 pub use help::HelpWidget;

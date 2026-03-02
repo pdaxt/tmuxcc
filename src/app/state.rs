@@ -1,4 +1,4 @@
-use crate::agentos::{AgentOSQueueTask, AlertsResponse, AnalyticsDigest};
+use crate::agentos::{AgentOSQueueTask, AlertsResponse, AnalyticsDigest, FactoryRequest};
 use crate::agents::MonitoredAgent;
 use crate::monitor::SystemStats;
 use crate::state_reader::DashboardData;
@@ -13,6 +13,8 @@ pub enum FocusedPanel {
     Sidebar,
     /// Input area is focused
     Input,
+    /// Factory command bar is focused
+    CommandBar,
 }
 
 /// Tree structure containing all monitored agents
@@ -123,6 +125,10 @@ pub struct AppState {
     pub dashboard: DashboardData,
     /// Whether dashboard panel is shown
     pub show_dashboard: bool,
+    /// Whether factory panel is shown
+    pub show_factory: bool,
+    /// Factory pipeline requests
+    pub factory_requests: Vec<FactoryRequest>,
     /// 24h analytics digest from AgentOS API
     pub digest: AnalyticsDigest,
     /// Active alerts from AgentOS API
@@ -155,6 +161,8 @@ impl AppState {
             show_queue: true,
             dashboard: DashboardData::default(),
             show_dashboard: true,
+            show_factory: false,
+            factory_requests: Vec::new(),
             digest: AnalyticsDigest::default(),
             alerts: AlertsResponse::default(),
         }
@@ -180,6 +188,11 @@ impl AppState {
         self.focused_panel == FocusedPanel::Input
     }
 
+    /// Check if command bar is focused
+    pub fn is_command_bar_focused(&self) -> bool {
+        self.focused_panel == FocusedPanel::CommandBar
+    }
+
     /// Focus on the input panel
     pub fn focus_input(&mut self) {
         self.focused_panel = FocusedPanel::Input;
@@ -190,11 +203,17 @@ impl AppState {
         self.focused_panel = FocusedPanel::Sidebar;
     }
 
+    /// Focus on the command bar
+    pub fn focus_command_bar(&mut self) {
+        self.focused_panel = FocusedPanel::CommandBar;
+    }
+
     /// Toggle focus between panels
     pub fn toggle_focus(&mut self) {
         self.focused_panel = match self.focused_panel {
             FocusedPanel::Sidebar => FocusedPanel::Input,
             FocusedPanel::Input => FocusedPanel::Sidebar,
+            FocusedPanel::CommandBar => FocusedPanel::Sidebar,
         };
     }
 
@@ -393,6 +412,11 @@ impl AppState {
     /// Toggles dashboard panel visibility
     pub fn toggle_dashboard(&mut self) {
         self.show_dashboard = !self.show_dashboard;
+    }
+
+    /// Toggles factory panel visibility
+    pub fn toggle_factory(&mut self) {
+        self.show_factory = !self.show_factory;
     }
 
     /// Sets an error message

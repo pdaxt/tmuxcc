@@ -16,20 +16,23 @@ impl InputWidget {
     pub fn render(frame: &mut Frame, area: Rect, state: &AppState) {
         let buffer = state.get_input();
         let cursor_pos = state.get_cursor_position();
-        let is_focused = state.is_input_focused();
+        let is_focused = state.is_input_focused() || state.is_command_bar_focused();
 
-        // Get target agent name
-        let target_name = state
-            .selected_agent()
-            .map(|a| a.abbreviated_path())
-            .unwrap_or_else(|| "None".to_string());
-
-        let title = format!(" Input → {} ", target_name);
-
-        let border_color = if is_focused {
-            Color::Green
+        let (title, border_color) = if state.is_command_bar_focused() {
+            (" Factory > ".to_string(), Color::Yellow)
         } else {
-            Color::DarkGray
+            let target_name = state
+                .selected_agent()
+                .map(|a| a.abbreviated_path())
+                .unwrap_or_else(|| "None".to_string());
+            (
+                format!(" Input → {} ", target_name),
+                if state.is_input_focused() {
+                    Color::Green
+                } else {
+                    Color::DarkGray
+                },
+            )
         };
 
         let block = Block::default()

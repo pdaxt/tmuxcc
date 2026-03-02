@@ -16,13 +16,13 @@ use tokio::sync::mpsc;
 
 use crate::agentos::AgentOSClient;
 use crate::app::{Action, AppState, Config};
-use crate::monitor::{MonitorTask, SystemStatsCollector};
+use crate::monitor::{FactoryCommand, MonitorTask, SystemStatsCollector};
 use crate::parsers::ParserRegistry;
 use crate::tmux::TmuxClient;
 
 use super::components::{
-    AgentTreeWidget, DashboardWidget, FooterWidget, HeaderWidget, HelpWidget, InputWidget,
-    PanePreviewWidget, QueuePanelWidget, SubagentLogWidget,
+    AgentTreeWidget, DashboardWidget, FactoryPanelWidget, FooterWidget, HeaderWidget, HelpWidget,
+    InputWidget, PanePreviewWidget, QueuePanelWidget, SubagentLogWidget,
 };
 use super::Layout;
 
@@ -58,12 +58,16 @@ pub async fn run_app(config: Config) -> Result<()> {
     // Create channel for monitor updates
     let (tx, mut rx) = mpsc::channel(32);
 
+    // Create channel for factory commands (TUI → monitor)
+    let (factory_tx, factory_rx) = mpsc::channel(8);
+
     // Start monitor task
     let monitor = MonitorTask::new(
         tmux_client.clone(),
         parser_registry.clone(),
         agentos_client,
         tx,
+        factory_rx,
         Duration::from_millis(config.poll_interval_ms),
     );
     let monitor_handle = tokio::spawn(async move {
@@ -80,6 +84,7 @@ pub async fn run_app(config: Config) -> Result<()> {
         &mut rx,
         &tmux_client,
         &mut system_stats,
+        &factory_tx,
     )
     .await;
 
@@ -102,6 +107,7 @@ async fn run_loop(
     rx: &mut mpsc::Receiver<crate::monitor::MonitorUpdate>,
     tmux_client: &TmuxClient,
     system_stats: &mut SystemStatsCollector,
+    factory_tx: &mpsc::Sender<FactoryCommand>,
 ) -> Result<()> {
     loop {
         // Advance animation tick
@@ -114,8 +120,12 @@ async fn run_loop(
         // Draw UI
         terminal.draw(|frame| {
             let size = frame.area();
-            let main_chunks =
-                Layout::main_layout_full(size, state.show_queue, state.show_dashboard);
+            let main_chunks = Layout::main_layout_all(
+                size,
+                state.show_queue,
+                state.show_dashboard,
+                state.show_factory,
+            );
 
             // Header
             HeaderWidget::render(frame, main_chunks[0], state);
@@ -168,8 +178,13 @@ async fn run_loop(
                 DashboardWidget::render(frame, main_chunks[3], state);
             }
 
+            // Factory panel (only when visible)
+            if state.show_factory {
+                FactoryPanelWidget::render(frame, main_chunks[4], state);
+            }
+
             // Footer
-            FooterWidget::render(frame, main_chunks[4], state);
+            FooterWidget::render(frame, main_chunks[5], state);
 
             // Help overlay
             if state.show_help {
@@ -198,6 +213,9 @@ async fn run_loop(
                 if let Some(d) = update.dashboard {
                     state.dashboard = d;
                 }
+                if let Some(f) = update.factory_requests {
+                    state.factory_requests = f;
+                }
                 // Ensure selected index is valid
                 if state.selected_index >= state.agents.root_agents.len() {
                     state.selected_index = state.agents.root_agents.len().saturating_sub(1);
@@ -217,7 +235,7 @@ async fn run_loop(
                     if let Event::Mouse(mouse) = event {
                         let size = terminal.size()?;
                         let area = ratatui::layout::Rect::new(0, 0, size.width, size.height);
-                        let main_chunks = Layout::main_layout_full(area, state.show_queue, state.show_dashboard);
+                        let main_chunks = Layout::main_layout_all(area, state.show_queue, state.show_dashboard, state.show_factory);
                         let footer_area = main_chunks[4];
                         let (sidebar, _, _, input_area) = Layout::content_layout_with_input(
                             main_chunks[1], state.sidebar_width, 3, state.show_summary_detail
@@ -521,6 +539,30 @@ async fn run_loop(
                             Action::ToggleDashboard => {
                                 state.toggle_dashboard();
                             }
+                            Action::ToggleFactory => {
+                                state.toggle_factory();
+                            }
+                            Action::EnterCommandBar => {
+                                state.take_input(); // Clear any existing input
+                                state.focus_command_bar();
+                                if !state.show_factory {
+                                    state.show_factory = true;
+                                }
+                            }
+                            Action::SubmitFactory => {
+                                let input = state.take_input();
+                                if !input.is_empty() {
+                                    state.flash("Factory: submitting...".to_string());
+                                    let _ = factory_tx.try_send(FactoryCommand::Submit {
+                                        request: input,
+                                    });
+                                }
+                                state.focus_sidebar();
+                            }
+                            Action::CancelCommandBar => {
+                                state.take_input();
+                                state.focus_sidebar();
+                            }
                             Action::PreviewScrollUp => {
                                 state.preview_scroll_up(5);
                             }
@@ -549,6 +591,21 @@ fn map_key_to_action(code: KeyCode, modifiers: KeyModifiers, state: &AppState) -
     // If help is shown, any key closes it
     if state.show_help {
         return Action::HideHelp;
+    }
+
+    // If command bar is focused, handle factory command input
+    if state.is_command_bar_focused() {
+        return match code {
+            KeyCode::Esc => Action::CancelCommandBar,
+            KeyCode::Enter => Action::SubmitFactory,
+            KeyCode::Backspace => Action::InputBackspace,
+            KeyCode::Left => Action::CursorLeft,
+            KeyCode::Right => Action::CursorRight,
+            KeyCode::Home => Action::CursorHome,
+            KeyCode::End => Action::CursorEnd,
+            KeyCode::Char(c) => Action::InputChar(c),
+            _ => Action::None,
+        };
     }
 
     // If input panel is focused, handle input-specific keys
@@ -614,6 +671,8 @@ fn map_key_to_action(code: KeyCode, modifiers: KeyModifiers, state: &AppState) -
 
         KeyCode::Char('Q') => Action::ToggleQueue,
         KeyCode::Char('D') => Action::ToggleDashboard,
+        KeyCode::Char('P') => Action::ToggleFactory,
+        KeyCode::Char(':') => Action::EnterCommandBar,
         KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => Action::PreviewScrollUp,
         KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
             Action::PreviewScrollDown
