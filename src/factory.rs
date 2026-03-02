@@ -366,12 +366,6 @@ pub fn get_pipeline(pipeline_id: &str) -> Option<PipelineView> {
 // Classification (rule-based project detection)
 // ============================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
-pub enum IntentType {
-    NewFeature, BugFix, Refactor, Test, Docs, Security, Performance, Unknown,
-}
-
 /// Try to detect which project a request is about from the description text.
 /// Returns (project_name, confidence) or None.
 pub fn detect_project(description: &str) -> Option<(String, f32)> {

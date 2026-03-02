@@ -290,7 +290,7 @@ pub fn parse_command(input: &str) -> Option<TuiCommand> {
         // :go dataxlr8 add OAuth login
         // :go dataxlr8 --quick fix login bug
         // :go dataxlr8 --secure add payments
-        Some("go") if parts.len() >= 2 => {
+        Some("go") | Some("factory") | Some("work") if parts.len() >= 2 => {
             let rest = if parts.len() == 3 {
                 format!("{} {}", parts[1], parts[2])
             } else {

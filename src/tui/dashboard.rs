@@ -2157,6 +2157,8 @@ fn render_help_bar(f: &mut Frame, area: Rect, data: &DashboardData) {
             Span::styled("ealth ", Style::default().fg(Color::DarkGray)),
             Span::styled("[l]", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
             Span::styled("og ", Style::default().fg(Color::DarkGray)),
+            Span::styled("[w]", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled("ork ", Style::default().fg(Color::DarkGray)),
             Span::styled("[y]", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
             Span::styled("pipe ", Style::default().fg(Color::DarkGray)),
             Span::styled("│ ", Style::default().fg(Color::DarkGray)),

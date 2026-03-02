@@ -882,6 +882,7 @@ pub const MCP_TOOLS: &[(&str, &str)] = &[
     ("pipeline", "Pipeline status"),
     ("pipelines", "List all pipelines"),
     ("gate", "Run quality gate on pipeline"),
+    ("pipeline_conflicts", "Scan pipeline file conflicts"),
     // Orchestration
     ("orchestrate", "Auto-build: NL → agents"),
     // Gateway (micro MCPs)
