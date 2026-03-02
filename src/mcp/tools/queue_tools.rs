@@ -199,6 +199,8 @@ pub async fn auto_cycle(app: &App) -> String {
     };
     use std::os::unix::io::AsRawFd;
     let fd = lock_file.as_raw_fd();
+    // SAFETY: flock() is a POSIX syscall. fd is valid (from lock_file.as_raw_fd() on an open File).
+    // LOCK_EX|LOCK_NB = exclusive non-blocking. Lock released when lock_file is dropped.
     let lock_result = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
     if lock_result != 0 {
         return "lock_held_by_another_instance".into();

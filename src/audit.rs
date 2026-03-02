@@ -588,6 +588,37 @@ fn store_audit(project: &str, result: &Value) {
     let _ = fs::write(&latest, serde_json::to_string_pretty(result).unwrap_or_default());
 }
 
+/// Load the latest audit result for a project by name.
+pub fn load_latest_audit(project_name: &str) -> Option<Value> {
+    let dir = config::agentos_root().join("audits").join(project_name);
+    let latest = dir.join("latest.json");
+    if !latest.exists() {
+        return None;
+    }
+    let content = fs::read_to_string(&latest).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+/// List all projects that have stored audit results.
+pub fn list_audited_projects() -> Vec<String> {
+    let audits_dir = config::agentos_root().join("audits");
+    if !audits_dir.exists() {
+        return Vec::new();
+    }
+    let mut projects = Vec::new();
+    if let Ok(entries) = fs::read_dir(&audits_dir) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() && entry.path().join("latest.json").exists() {
+                if let Some(name) = entry.file_name().to_str() {
+                    projects.push(name.to_string());
+                }
+            }
+        }
+    }
+    projects.sort();
+    projects
+}
+
 // ========== Core Scanning Engine ==========
 
 fn scan_source_files(root: &Path, patterns: &[(&str, &'static str, &'static str, &'static str)]) -> Vec<Finding> {

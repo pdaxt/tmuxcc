@@ -13,8 +13,11 @@ use super::dashboard::DashboardData;
 pub fn render_overlay(f: &mut Frame, area: Rect, mode: &TuiMode, _data: &DashboardData) {
     match mode {
         TuiMode::Navigate => {} // No overlay
-        TuiMode::Command { input: input_str, cursor } => {
+        TuiMode::Command { input: input_str, cursor, completions, comp_idx } => {
             render_command_bar(f, area, input_str, *cursor);
+            if !completions.is_empty() {
+                render_autocomplete(f, area, completions, *comp_idx);
+            }
         }
         TuiMode::Input { form } => {
             render_form(f, area, form);
@@ -170,6 +173,34 @@ fn render_result(f: &mut Frame, area: Rect, message: &str, is_error: bool) {
         .style(Style::default().fg(color))
         .alignment(Alignment::Center);
     f.render_widget(text, inner);
+}
+
+/// Autocomplete dropdown for command mode
+fn render_autocomplete(f: &mut Frame, area: Rect, completions: &[(String, String)], selected: Option<usize>) {
+    if completions.is_empty() { return; }
+    let height = (completions.len() as u16 + 2).min(8);
+    let width = 50u16.min(area.width - 2);
+    let popup = Rect::new(1, area.y + area.height - 1 - height, width, height);
+    f.render_widget(Clear, popup);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray));
+    let inner = block.inner(popup);
+    f.render_widget(block, popup);
+
+    let lines: Vec<Line> = completions.iter().enumerate().take(inner.height as usize).map(|(i, (cmd, desc))| {
+        let style = if selected == Some(i) {
+            Style::default().fg(Color::Black).bg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::White)
+        };
+        Line::from(vec![
+            Span::styled(format!(" {:<12}", cmd), style.add_modifier(Modifier::BOLD)),
+            Span::styled(desc.as_str(), Style::default().fg(Color::DarkGray)),
+        ])
+    }).collect();
+    f.render_widget(Paragraph::new(lines), inner);
 }
 
 /// Create a centered rectangle

@@ -167,50 +167,130 @@ pub fn form_to_command(form: &FormState) -> Option<TuiCommand> {
     }
 }
 
-/// Parse a colon-command string into a TuiCommand
+/// Parse a colon-command string into a TuiCommand.
+/// Known shorthands get fast-path treatment. Everything else becomes McpDispatch.
 pub fn parse_command(input: &str) -> Option<TuiCommand> {
     let parts: Vec<&str> = input.splitn(3, ' ').collect();
-    match parts.first().map(|s| s.to_lowercase()).as_deref() {
-        Some("spawn" | "s") if parts.len() >= 3 => {
-            Some(TuiCommand::Spawn {
+    let cmd_lower = parts.first().map(|s| s.to_lowercase());
+
+    // Fast-path shorthands
+    match cmd_lower.as_deref() {
+        Some("s") if parts.len() >= 3 => {
+            return Some(TuiCommand::Spawn {
                 pane: parts[1].to_string(),
                 project: parts[2].to_string(),
                 role: None,
                 task: None,
-            })
+            });
         }
-        Some("kill" | "k") if parts.len() >= 2 => {
-            Some(TuiCommand::Kill {
+        Some("k") if parts.len() >= 2 => {
+            return Some(TuiCommand::Kill {
                 pane: parts[1].to_string(),
                 reason: parts.get(2).map(|s| s.to_string()),
-            })
+            });
         }
-        Some("done" | "complete") if parts.len() >= 2 => {
-            Some(TuiCommand::Complete {
+        Some("done") if parts.len() >= 2 => {
+            return Some(TuiCommand::Complete {
                 pane: parts[1].to_string(),
                 summary: parts.get(2).map(|s| s.to_string()),
-            })
+            });
         }
-        Some("auto" | "cycle") => {
-            Some(TuiCommand::AutoCycle)
+        Some("cycle") => {
+            return Some(TuiCommand::AutoCycle);
         }
-        Some("feature" | "feat") if parts.len() >= 3 => {
-            Some(TuiCommand::FeatureCreate {
+        Some("feat") if parts.len() >= 3 => {
+            return Some(TuiCommand::FeatureCreate {
                 space: parts[1].to_string(),
                 title: parts[2].to_string(),
                 issue_type: "feature".into(),
                 priority: None,
-            })
+            });
         }
-        Some("queue-feature" | "qf") if parts.len() >= 3 => {
+        Some("qf") if parts.len() >= 3 => {
             let ids: Vec<String> = parts[2].split(',').map(|s| s.trim().to_string()).collect();
-            Some(TuiCommand::FeatureToQueue {
+            return Some(TuiCommand::FeatureToQueue {
                 space: parts[1].to_string(),
                 issue_ids: ids,
-            })
+            });
         }
-        _ => None,
+        _ => {}
     }
+
+    // Universal MCP dispatch — first word is tool name, rest is key=value args
+    let tool = parts.first()?.to_string();
+    if tool.is_empty() { return None; }
+
+    let args = if parts.len() > 1 {
+        let rest = if parts.len() == 3 {
+            format!("{} {}", parts[1], parts[2])
+        } else {
+            parts[1].to_string()
+        };
+        parse_args(&rest)
+    } else {
+        serde_json::json!({})
+    };
+
+    Some(TuiCommand::McpDispatch { tool, args })
+}
+
+/// Parse `key=value key2="quoted value"` into a JSON object.
+/// Bare words without `=` are ignored (positional args not supported in universal dispatch).
+fn parse_args(input: &str) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    let mut chars = input.chars().peekable();
+
+    while chars.peek().is_some() {
+        // Skip whitespace
+        while chars.peek().map_or(false, |c| c.is_whitespace()) { chars.next(); }
+
+        // Read key
+        let mut key = String::new();
+        while chars.peek().map_or(false, |c| *c != '=' && !c.is_whitespace()) {
+            key.push(chars.next().unwrap());
+        }
+
+        if chars.peek() == Some(&'=') {
+            chars.next(); // consume '='
+            let mut value = String::new();
+            if chars.peek() == Some(&'"') {
+                chars.next(); // consume opening quote
+                while chars.peek().map_or(false, |c| *c != '"') {
+                    value.push(chars.next().unwrap());
+                }
+                chars.next(); // consume closing quote
+            } else {
+                while chars.peek().map_or(false, |c| !c.is_whitespace()) {
+                    value.push(chars.next().unwrap());
+                }
+            }
+            if !key.is_empty() {
+                // Try to parse as number/bool, fall back to string
+                if let Ok(n) = value.parse::<i64>() {
+                    map.insert(key, serde_json::Value::Number(n.into()));
+                } else if let Ok(b) = value.parse::<bool>() {
+                    map.insert(key, serde_json::Value::Bool(b));
+                } else {
+                    map.insert(key, serde_json::Value::String(value));
+                }
+            }
+        } else {
+            // Bare word without = — if it's the only thing, treat as first required arg
+            // For common patterns: `:who`, `:port_list` (no args needed)
+            // For `:kb_search auth` — treat bare word as "query" for convenience
+            if !key.is_empty() && map.is_empty() {
+                // Read rest of input as the value
+                let mut rest = key;
+                while chars.peek().is_some() {
+                    rest.push(chars.next().unwrap());
+                }
+                // Common first-arg field names by convention
+                map.insert("query".to_string(), serde_json::Value::String(rest));
+            }
+        }
+    }
+
+    serde_json::Value::Object(map)
 }
 
 fn non_empty(s: &str) -> Option<String> {

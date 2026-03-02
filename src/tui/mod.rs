@@ -2,7 +2,9 @@ pub mod dashboard;
 pub mod widgets;
 pub mod input;
 pub mod overlays;
+pub mod dispatch;
 
+use std::collections::VecDeque;
 use std::io;
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
@@ -31,6 +33,8 @@ pub enum ViewMode {
     Projects,
     Infra,
     Intel,
+    Audit,
+    Log,
 }
 
 // ========== TUI Mode (State Machine) ==========
@@ -38,7 +42,7 @@ pub enum ViewMode {
 #[derive(Clone)]
 pub enum TuiMode {
     Navigate,
-    Command { input: String, cursor: usize },
+    Command { input: String, cursor: usize, completions: Vec<(String, String)>, comp_idx: Option<usize> },
     Input { form: input::FormState },
     Confirm { action: PendingAction, message: String },
     Executing { description: String, started: Instant },
@@ -90,6 +94,10 @@ pub enum TuiCommand {
         space: String,
         issue_id: String,
         status: String,
+    },
+    McpDispatch {
+        tool: String,
+        args: serde_json::Value,
     },
 }
 
@@ -216,6 +224,12 @@ async fn execute_command(app: &App, cmd: TuiCommand) -> TuiResult {
             });
             TuiResult { description: desc, success: true, message: result }
         }
+        TuiCommand::McpDispatch { tool, args } => {
+            let desc = format!(":{}", tool);
+            let result = dispatch::dispatch_mcp_tool(app, &tool, args).await;
+            let success = !result.contains("\"error\"");
+            TuiResult { description: desc, success, message: result }
+        }
     }
 }
 
@@ -233,10 +247,21 @@ fn run_loop(
     let mut feature_cursor: usize = 0;
     let tick_rate = Duration::from_millis(TICK_MS);
     let mut last_tick = Instant::now();
+    let mut action_log: VecDeque<dashboard::ActionLogEntry> = VecDeque::new();
 
     loop {
         // Poll for async results (non-blocking)
         if let Ok(result) = result_rx.try_recv() {
+            // Add to action log
+            let entry = dashboard::ActionLogEntry {
+                timestamp: chrono::Local::now().format("%H:%M:%S").to_string(),
+                tool: result.description.clone(),
+                success: result.success,
+                summary: extract_summary(&result),
+            };
+            action_log.push_front(entry);
+            if action_log.len() > 50 { action_log.pop_back(); }
+
             mode = TuiMode::Result {
                 message: extract_summary(&result),
                 is_error: !result.success,
@@ -252,6 +277,7 @@ fn run_loop(
         }
 
         let mut data = dashboard::collect_data(app, selected, view_mode, feature_cursor);
+        data.action_log = action_log.iter().cloned().collect();
         // Clamp feature cursor
         let feat_max: usize = data.features.iter().map(|f| 1 + f.children.len()).sum();
         if feat_max > 0 && feature_cursor >= feat_max {
@@ -356,7 +382,7 @@ fn handle_navigate(
 
         // Command mode
         KeyCode::Char(':') => {
-            *mode = TuiMode::Command { input: String::new(), cursor: 0 };
+            *mode = TuiMode::Command { input: String::new(), cursor: 0, completions: Vec::new(), comp_idx: None };
         }
 
         // Spawn form
@@ -415,6 +441,12 @@ fn handle_navigate(
         KeyCode::Char('g') => {
             *view_mode = if *view_mode == ViewMode::Intel { ViewMode::Normal } else { ViewMode::Intel };
         }
+        KeyCode::Char('h') => {
+            *view_mode = if *view_mode == ViewMode::Audit { ViewMode::Normal } else { ViewMode::Audit };
+        }
+        KeyCode::Char('l') => {
+            *view_mode = if *view_mode == ViewMode::Log { ViewMode::Normal } else { ViewMode::Log };
+        }
 
         // Pane selection
         KeyCode::Char(c @ '1'..='9') => {
@@ -460,14 +492,26 @@ fn handle_command(
     mode: &mut TuiMode,
     cmd_tx: &mpsc::Sender<TuiCommand>,
 ) {
-    let (input_str, cursor) = match mode {
-        TuiMode::Command { input, cursor } => (input, cursor),
+    let (input_str, cursor, completions, comp_idx) = match mode {
+        TuiMode::Command { input, cursor, completions, comp_idx } => (input, cursor, completions, comp_idx),
         _ => return,
     };
 
     match key.code {
         KeyCode::Esc => {
             *mode = TuiMode::Navigate;
+        }
+        KeyCode::Tab => {
+            if !completions.is_empty() {
+                let idx = match comp_idx {
+                    Some(i) => (*i + 1) % completions.len(),
+                    None => 0,
+                };
+                *comp_idx = Some(idx);
+                let tool_name = completions[idx].0.clone();
+                *input_str = format!("{} ", tool_name);
+                *cursor = input_str.len();
+            }
         }
         KeyCode::Enter => {
             let trimmed = input_str.trim().to_string();
@@ -490,6 +534,9 @@ fn handle_command(
                 input_str.remove(*cursor - 1);
                 *cursor -= 1;
             }
+            *comp_idx = None;
+            let prefix = input_str.split_whitespace().next().unwrap_or("");
+            *completions = dispatch::completions_for(prefix).iter().map(|(n, d)| (n.to_string(), d.to_string())).collect();
         }
         KeyCode::Left => {
             if *cursor > 0 { *cursor -= 1; }
@@ -502,6 +549,13 @@ fn handle_command(
         KeyCode::Char(c) => {
             input_str.insert(*cursor, c);
             *cursor += 1;
+            *comp_idx = None;
+            // Update completions only while typing the first word (tool name)
+            if !input_str.contains(' ') {
+                *completions = dispatch::completions_for(input_str).iter().map(|(n, d)| (n.to_string(), d.to_string())).collect();
+            } else {
+                completions.clear();
+            }
         }
         _ => {}
     }

@@ -333,17 +333,15 @@ impl AgentOSService {
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
-    // === MULTI-AGENT COORDINATION (31 tools) ===
+    // === MULTI-AGENT COORDINATION (37 tools) ===
 
     #[tool(description = "Allocate a port for a service. Finds free port in 3001-3099 range, checks for conflicts.")]
     async fn port_allocate(
         &self,
         Parameters(req): Parameters<PortAllocateRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::port_allocate(
-            &req.service, &req.pane_id, req.preferred, &req.description.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::port_allocate(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Release an allocated port back to the pool.")]
@@ -351,14 +349,14 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<PortReleaseRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::port_release(req.port);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::port_release(req.port);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "List all allocated ports with active/inactive status.")]
     async fn port_list(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::port_list();
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::port_list();
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Get the port allocated for a service by name.")]
@@ -366,8 +364,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<PortGetRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::port_get(&req.service);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::port_get(&req.service);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Register an agent in a pane. Returns other agents on same project for coordination.")]
@@ -375,9 +373,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<AgentRegisterRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let files = req.files.unwrap_or_default();
-        let result = crate::multi_agent::agent_register(&req.pane_id, &req.project, &req.task, &files);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::agent_register(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Update an agent's current task and file list.")]
@@ -385,8 +382,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<AgentUpdateRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::agent_update(&req.pane_id, &req.task, req.files.as_deref());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::agent_update(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "List all registered agents, optionally filtered by project.")]
@@ -394,8 +391,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<AgentListRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::agent_list(req.project.as_deref());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::agent_list(req.project.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Deregister an agent and release its locks.")]
@@ -403,8 +400,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<AgentDeregisterRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::agent_deregister(&req.pane_id);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::agent_deregister(&req.pane_id);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Acquire file locks to prevent concurrent edits. Returns blocked status if files locked by others.")]
@@ -412,10 +409,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<LockAcquireRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::lock_acquire(
-            &req.pane_id, &req.files, &req.reason.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::lock_acquire(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Release file locks. Empty files list releases all locks for this pane.")]
@@ -423,9 +418,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<LockReleaseRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let files = req.files.unwrap_or_default();
-        let result = crate::multi_agent::lock_release(&req.pane_id, &files);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::lock_release(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Check if files are locked and by whom.")]
@@ -433,8 +427,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<LockCheckRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::lock_check(&req.files);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::lock_check(&req.files);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Claim a git branch for exclusive use. Prevents other agents from using the same branch.")]
@@ -442,10 +436,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<GitClaimBranchRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::git_claim_branch(
-            &req.pane_id, &req.branch, &req.repo, &req.purpose.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::git_claim_branch(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Release a claimed git branch.")]
@@ -453,8 +445,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<GitReleaseBranchRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::git_release_branch(&req.pane_id, &req.branch, &req.repo);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::git_release_branch(&req.pane_id, &req.branch, &req.repo);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "List all claimed git branches, optionally filtered by repo.")]
@@ -462,8 +454,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<GitListBranchesRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::git_list_branches(req.repo.as_deref());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::git_list_branches(req.repo.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Check for conflicts before committing: file locks and concurrent edits.")]
@@ -471,8 +463,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<GitPreCommitCheckRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::git_pre_commit_check(&req.pane_id, &req.repo, &req.files);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::git_pre_commit_check(&req.pane_id, &req.repo, &req.files);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Claim exclusive build access for a project. Prevents concurrent builds.")]
@@ -480,10 +472,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<BuildClaimRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::build_claim(
-            &req.pane_id, &req.project, &req.build_type.unwrap_or_else(|| "default".into()),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::build_claim(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Release build claim and record result in history.")]
@@ -491,10 +481,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<BuildReleaseRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::build_release(
-            &req.pane_id, &req.project, req.success, &req.output.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::build_release(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Check if a project is currently being built.")]
@@ -502,8 +490,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<BuildStatusRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::build_status(&req.project);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::build_status(&req.project);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Get the last build result for a project.")]
@@ -511,8 +499,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<BuildGetLastRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::build_get_last(&req.project);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::build_get_last(&req.project);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Add an inter-agent task to the shared queue (not the AgentOS auto-cycle queue).")]
@@ -520,11 +508,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<MaTaskAddRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::task_add(
-            &req.project, &req.title, &req.description.unwrap_or_default(),
-            &req.priority.unwrap_or_else(|| "medium".into()), &req.added_by,
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::task_add(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Claim the next pending inter-agent task by priority.")]
@@ -532,8 +517,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<MaTaskClaimRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::task_claim(&req.pane_id, req.project.as_deref());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::task_claim(&req.pane_id, req.project.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Mark an inter-agent task as completed.")]
@@ -541,10 +526,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<MaTaskCompleteRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::task_complete(
-            &req.task_id, &req.pane_id, &req.result.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::task_complete(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "List inter-agent tasks, optionally filtered by status and project.")]
@@ -552,8 +535,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<MaTaskListRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::task_list(req.status.as_deref(), req.project.as_deref());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::task_list(req.status.as_deref(), req.project.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Add a knowledge base entry for cross-agent learning.")]
@@ -561,11 +544,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<KbAddRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let files = req.files.unwrap_or_default();
-        let result = crate::multi_agent::kb_add(
-            &req.pane_id, &req.project, &req.category, &req.title, &req.content, &files,
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::kb_add(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Search the knowledge base by query, optionally filtered by project and category.")]
@@ -573,8 +553,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<KbSearchRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::kb_search(&req.query, req.project.as_deref(), req.category.as_deref());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::kb_search(&req.query, req.project.as_deref(), req.category.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "List recent knowledge base entries.")]
@@ -582,8 +562,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<KbListRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::kb_list(req.project.as_deref(), req.limit.unwrap_or(20));
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::kb_list(req.project.as_deref(), req.limit.unwrap_or(20));
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Broadcast a message to all agents.")]
@@ -591,10 +571,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<MsgBroadcastRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::msg_broadcast(
-            &req.from_pane, &req.message, &req.priority.unwrap_or_else(|| "info".into()),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::msg_broadcast(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Send a direct message to a specific agent.")]
@@ -602,8 +580,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<MsgSendRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::msg_send(&req.from_pane, &req.to_pane, &req.message);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::msg_send(&req.from_pane, &req.to_pane, &req.message);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Get unread messages for this agent. Marks as read by default.")]
@@ -611,14 +589,14 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<MsgGetRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::msg_get(&req.pane_id, req.mark_read.unwrap_or(true));
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::msg_get(&req.pane_id, req.mark_read.unwrap_or(true));
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Clean up stale entries: ports, agents, locks, branches, builds from inactive panes.")]
     async fn cleanup_all(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::cleanup_all();
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::cleanup_all();
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Full status overview: ports, agents, locks, builds, pending tasks.")]
@@ -626,8 +604,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<StatusOverviewRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::status_overview(req.project.as_deref());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::status_overview(req.project.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     // === TRACKER TOOLS (15 tools) ===
@@ -731,9 +709,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<ProcessStartRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let ctx = req.context.unwrap_or(serde_json::json!({}));
-        let result = crate::tracker::process_start(&req.space, &req.template_name, &ctx);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::tracker_tools::process_start(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Update a process step as done or undone.")]
@@ -741,10 +718,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<ProcessUpdateRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::tracker::process_update(
-            &req.space, &req.process_id, req.step_index, req.done.unwrap_or(true),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::tracker_tools::process_update(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "List all processes in a space with progress.")]
@@ -752,8 +727,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<ProcessListRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::tracker::process_list(&req.space);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::tracker_tools::process_list(&req.space);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Create a checklist template from markdown with - [ ] items.")]
@@ -761,8 +736,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<ProcessTemplateCreateRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::tracker::process_template_create(&req.name, &req.content);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::tracker_tools::process_template_create(&req.name, &req.content);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Kanban board view of all issues in a space grouped by status.")]
@@ -781,8 +756,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<IssueChildrenRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::tracker::issue_children(&req.space, &req.parent_id);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::tracker_tools::issue_children(&req.space, &req.parent_id);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Decompose a feature/epic into micro-feature child issues. Creates task issues linked to parent. Children: [{title, description?, priority?, role?, estimated_acu?}]")]
@@ -790,8 +765,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<FeatureDecomposeRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::tracker::feature_decompose(&req.space, &req.parent_id, &req.children);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::tracker_tools::feature_decompose(&req.space, &req.parent_id, &req.children);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Push tracker issues into the execution queue. Links queue tasks back to issues for auto-status updates on completion. Set sequential=true for ordered execution.")]
@@ -808,8 +783,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<FeatureStatusRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::tracker::feature_status(&req.space, &req.feature_id);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::tracker_tools::feature_status(&req.space, &req.feature_id);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     // === CAPACITY TOOLS (8 tools) ===
@@ -819,11 +794,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<CapConfigureRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::capacity::cap_configure(
-            req.pane_count, req.hours_per_day, req.availability_factor,
-            req.review_bandwidth, req.build_slots,
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::capacity_tools::cap_configure(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Estimate ACU for a task based on type, complexity, and role.")]
@@ -831,11 +803,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<CapEstimateRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::capacity::cap_estimate(
-            &req.description, &req.complexity.unwrap_or_default(),
-            &req.task_type.unwrap_or_default(), &req.role.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::capacity_tools::cap_estimate(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Log work done: ACU spent on an issue with role and review tracking.")]
@@ -843,11 +812,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<CapLogWorkRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::capacity::cap_log_work_full(
-            &req.issue_id, &req.space, &req.role, &req.pane_id.unwrap_or_default(),
-            req.acu_spent, req.review_needed.unwrap_or(false), &req.notes.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::capacity_tools::cap_log_work(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Plan a sprint: assign issues, calculate capacity vs load, detect bottlenecks.")]
@@ -855,11 +821,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<CapPlanSprintRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::capacity::cap_plan_sprint(
-            &req.space, &req.name.unwrap_or_default(), &req.start_date.unwrap_or_default(),
-            req.days.unwrap_or(5), &req.issue_ids.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::capacity_tools::cap_plan_sprint(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Capacity dashboard: today's ACU usage, review load, active sprint progress.")]
@@ -867,10 +830,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<CapDashboardRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::capacity::cap_dashboard(
-            &req.space.unwrap_or_default(), &req.sprint_id.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::capacity_tools::cap_dashboard(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Sprint burndown chart: ideal vs actual progress with projection.")]
@@ -878,8 +839,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<CapBurndownRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::capacity::cap_burndown(&req.sprint_id.unwrap_or_default());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::capacity_tools::cap_burndown(&req.sprint_id.clone().unwrap_or_default());
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Sprint velocity: historical throughput across sprints with accuracy tracking.")]
@@ -887,24 +848,22 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<CapVelocityRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::capacity::cap_velocity(
-            &req.space.unwrap_or_default(), req.count.unwrap_or(5),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::capacity_tools::cap_velocity(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "List all roles with definitions and today's utilization per role.")]
     async fn cap_roles(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::capacity::cap_roles();
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::capacity_tools::cap_roles();
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     // === COLLAB TOOLS (19 tools) ===
 
     #[tool(description = "List all collaboration spaces with document counts.")]
     async fn space_list(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::collab::space_list();
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::collab_tools::space_list();
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Create a new collaboration space for organizing docs by project.")]
@@ -912,8 +871,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<SpaceCreateRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::collab::space_create(&req.name);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::collab_tools::space_create(&req.name);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "List documents. Filter by space and/or status (draft, review, approved, locked).")]
@@ -921,8 +880,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<DocListRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::collab::doc_list(&req.space.unwrap_or_default(), &req.status.unwrap_or_default());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::collab_tools::doc_list(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Read a document and its metadata, comments, directives, and proposals.")]
@@ -930,8 +889,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<DocReadRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::collab::doc_read(&req.space, &req.name, req.include_meta.unwrap_or(true));
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::collab_tools::doc_read(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Create a new markdown document in a space.")]
@@ -939,11 +898,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<DocCreateRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::collab::doc_create(
-            &req.space, &req.name, &req.content.unwrap_or_default(),
-            &req.status.unwrap_or_default(), &req.tags.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::collab_tools::doc_create(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Edit a document. Fails if locked by another agent — use doc_propose instead.")]
@@ -951,10 +907,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<DocEditRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::collab::doc_edit(
-            &req.space, &req.name, &req.content, &req.agent_id.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::collab_tools::doc_edit(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Propose changes to a document for human review. Use when doc is locked or review is wanted.")]
@@ -962,11 +916,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<DocProposeRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::collab::doc_propose(
-            &req.space, &req.name, &req.content,
-            &req.summary.unwrap_or_default(), &req.agent_id.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::collab_tools::doc_propose(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Approve a proposal and merge it into the document.")]
@@ -974,10 +925,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<DocApproveRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::collab::doc_approve(
-            &req.space, &req.name, &req.proposal_id.unwrap_or_else(|| "latest".into()),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::collab_tools::doc_approve(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Reject a proposal with a reason.")]
@@ -985,10 +934,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<DocRejectRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::collab::doc_reject(
-            &req.space, &req.name, &req.proposal_id, &req.reason.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::collab_tools::doc_reject(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Lock a document. Prevents direct editing — agents must use doc_propose. Auto-expires after 30 min.")]
@@ -996,10 +943,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<DocLockRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::collab::doc_lock(
-            &req.space, &req.name, &req.locked_by.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::collab_tools::doc_lock(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Unlock a document. Allows direct editing again.")]
@@ -1007,8 +952,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<DocUnlockRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::collab::doc_unlock(&req.space, &req.name);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::collab_tools::doc_unlock(&req.space, &req.name);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Add a comment to a document. For feedback, questions, or directive responses.")]
@@ -1016,11 +961,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<DocCommentRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::collab::doc_comment(
-            &req.space, &req.name, &req.text,
-            &req.author.unwrap_or_default(), req.line.unwrap_or(0),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::collab_tools::doc_comment(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Read all comments on a document.")]
@@ -1028,8 +970,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<DocCommentsRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::collab::doc_comments(&req.space, &req.name);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::collab_tools::doc_comments(&req.space, &req.name);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Update document status: draft, review, approved, archived.")]
@@ -1037,8 +979,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<DocStatusRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::collab::doc_status(&req.space, &req.name, &req.status);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::collab_tools::doc_status(&req.space, &req.name, &req.status);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Search across all documents for text matches (case-insensitive).")]
@@ -1046,8 +988,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<DocSearchRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::collab::doc_search(&req.query, &req.space.unwrap_or_default());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::collab_tools::doc_search(&req.query, &req.space.clone().unwrap_or_default());
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Find all <!-- @claude: ... --> directives — tasks/questions from humans for Claude.")]
@@ -1055,8 +997,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<DocDirectivesRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::collab::doc_directives(&req.space.unwrap_or_default());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::collab_tools::doc_directives(&req.space.clone().unwrap_or_default());
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Show git version history of a document.")]
@@ -1064,8 +1006,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<DocHistoryRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::collab::doc_history(&req.space, &req.name, req.limit.unwrap_or(10));
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::collab_tools::doc_history(&req.space, &req.name, req.limit.unwrap_or(10));
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Delete a document and its metadata/proposals. Requires confirm=true.")]
@@ -1073,14 +1015,14 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<DocDeleteRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::collab::doc_delete(&req.space, &req.name, req.confirm.unwrap_or(false));
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::collab_tools::doc_delete(&req.space, &req.name, req.confirm.unwrap_or(false));
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Initialize the collab workspace. Creates directories and sets up git.")]
     async fn collab_init(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::collab::collab_init();
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::collab_tools::collab_init();
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     // === KNOWLEDGE GRAPH TOOLS (8 tools) ===
@@ -1090,12 +1032,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<KgraphAddEntityRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::knowledge::kgraph_add_entity(
-            &req.name, &req.entity_type,
-            &req.properties.unwrap_or_else(|| "{}".into()),
-            &req.id.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::knowledge_tools::kgraph_add_entity(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Add a typed edge between two entities. Relations: uses, depends_on, causes, fixes, part_of, related_to, etc.")]
@@ -1103,12 +1041,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<KgraphAddEdgeRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::knowledge::kgraph_add_edge(
-            &req.source, &req.target, &req.relation,
-            req.weight.unwrap_or(1.0),
-            &req.properties.unwrap_or_else(|| "{}".into()),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::knowledge_tools::kgraph_add_edge(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Record an observation on an edge. Auto-creates entities and edges. Adjusts weight by impact.")]
@@ -1116,12 +1050,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<KgraphObserveRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::knowledge::kgraph_observe(
-            &req.source, &req.target, &req.relation, &req.observation,
-            req.impact.unwrap_or(0.1),
-            &req.session_id.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::knowledge_tools::kgraph_observe(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Query neighbors of an entity via BFS traversal. Returns subgraph with nodes and edges.")]
@@ -1129,12 +1059,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<KgraphQueryNeighborsRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::knowledge::kgraph_query_neighbors(
-            &req.entity, &req.relation.unwrap_or_default(),
-            &req.direction.unwrap_or_else(|| "both".into()),
-            req.depth.unwrap_or(1), req.limit.unwrap_or(50),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::knowledge_tools::kgraph_query_neighbors(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Find shortest path between two entities in the knowledge graph.")]
@@ -1142,10 +1068,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<KgraphQueryPathRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::knowledge::kgraph_query_path(
-            &req.source, &req.target, req.max_depth.unwrap_or(4),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::knowledge_tools::kgraph_query_path(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Search entities by name or properties. Filter by type.")]
@@ -1153,11 +1077,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<KgraphSearchRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::knowledge::kgraph_search(
-            &req.query, &req.entity_type.unwrap_or_default(),
-            req.limit.unwrap_or(20),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::knowledge_tools::kgraph_search(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Delete an entity (cascades edges) or a specific edge.")]
@@ -1165,19 +1086,14 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<KgraphDeleteRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::knowledge::kgraph_delete(
-            &req.entity_id.unwrap_or_default(),
-            &req.edge_source.unwrap_or_default(),
-            &req.edge_target.unwrap_or_default(),
-            &req.edge_relation.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::knowledge_tools::kgraph_delete(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Knowledge graph statistics: entity count, edge count, observations, breakdowns by type and relation.")]
     async fn kgraph_stats(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::knowledge::kgraph_stats();
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::knowledge_tools::kgraph_stats();
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     // === SESSION REPLAY TOOLS (7 tools) ===
@@ -1187,11 +1103,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<ReplayIndexRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::knowledge::replay_index(
-            req.force.unwrap_or(false),
-            &req.project.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::knowledge_tools::replay_index(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Search across all indexed sessions for content matches. Filter by project, tool, time range.")]
@@ -1199,12 +1112,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<ReplaySearchRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::knowledge::replay_search(
-            &req.query, &req.project.unwrap_or_default(),
-            &req.tool.unwrap_or_default(),
-            req.limit.unwrap_or(20), req.days.unwrap_or(0),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::knowledge_tools::replay_search(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Retrieve full session turns. Filter tool results and errors.")]
@@ -1212,13 +1121,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<ReplaySessionRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::knowledge::replay_session(
-            &req.session_id,
-            req.include_tools.unwrap_or(true),
-            req.include_errors.unwrap_or(true),
-            req.max_messages.unwrap_or(100),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::knowledge_tools::replay_session(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "List indexed sessions. Filter by project and time range.")]
@@ -1226,11 +1130,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<ReplayListSessionsRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::knowledge::replay_list_sessions(
-            &req.project.unwrap_or_default(),
-            req.days.unwrap_or(30), req.limit.unwrap_or(50),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::knowledge_tools::replay_list_sessions(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Show usage history for a specific tool across sessions.")]
@@ -1238,10 +1139,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<ReplayToolHistoryRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::knowledge::replay_tool_history(
-            &req.tool_name, req.limit.unwrap_or(20), req.days.unwrap_or(0),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::knowledge_tools::replay_tool_history(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "List recent errors across sessions. Filter by project and time range.")]
@@ -1249,17 +1148,14 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<ReplayErrorsRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::knowledge::replay_errors(
-            &req.project.unwrap_or_default(),
-            req.days.unwrap_or(7), req.limit.unwrap_or(50),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::knowledge_tools::replay_errors(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Session replay index status: session count, messages, errors, unindexed files.")]
     async fn replay_status(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::knowledge::replay_status();
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::knowledge_tools::replay_status();
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     // === TRUTHGUARD TOOLS (8 tools) ===
@@ -1269,14 +1165,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<FactAddRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::knowledge::fact_add(
-            &req.category, &req.key, &req.value,
-            req.confidence.unwrap_or(1.0),
-            &req.source.unwrap_or_default(),
-            &req.aliases.unwrap_or_default(),
-            &req.tags.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::knowledge_tools::fact_add(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Get a fact by ID, key, or category+key.")]
@@ -1284,12 +1174,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<FactGetRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::knowledge::fact_get(
-            &req.fact_id.unwrap_or_default(),
-            &req.key.unwrap_or_default(),
-            &req.category.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::knowledge_tools::fact_get(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Search facts by text match on key, value, or aliases. Filter by category and confidence.")]
@@ -1297,13 +1183,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<FactSearchRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::knowledge::fact_search(
-            &req.query.unwrap_or_default(),
-            &req.category.unwrap_or_default(),
-            req.min_confidence.unwrap_or(0.0),
-            req.limit.unwrap_or(20),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::knowledge_tools::fact_search(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Check a claim against known facts. Returns matches, contradictions, and verdicts.")]
@@ -1311,8 +1192,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<FactCheckRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::knowledge::fact_check(&req.claim);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::knowledge_tools::fact_check(&req.claim);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Check an entire response for factual contradictions. Splits into sentences and checks each.")]
@@ -1320,8 +1201,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<FactCheckResponseRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::knowledge::fact_check_response(&req.response_text);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::knowledge_tools::fact_check_response(&req.response_text);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Update a fact's value, confidence, aliases, source, or tags. Logged in audit trail.")]
@@ -1329,17 +1210,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<FactUpdateRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::knowledge::fact_update(
-            &req.fact_id.unwrap_or_default(),
-            &req.category.unwrap_or_default(),
-            &req.key.unwrap_or_default(),
-            &req.value.unwrap_or_default(),
-            req.confidence.unwrap_or(-1.0),
-            &req.aliases.unwrap_or_default(),
-            &req.source.unwrap_or_default(),
-            &req.tags.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::knowledge_tools::fact_update(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Delete a fact with audit logging. Irreversible.")]
@@ -1347,16 +1219,14 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<FactDeleteRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::knowledge::fact_delete(
-            &req.fact_id, &req.reason.unwrap_or_default(),
-        );
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::knowledge_tools::fact_delete(&req.fact_id, &req.reason.clone().unwrap_or_default());
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "TruthGuard status: fact count by category, total checks, contradictions found.")]
     async fn truthguard_status(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::knowledge::truthguard_status();
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::knowledge_tools::truthguard_status();
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     // === MACHINE IDENTITY ===
@@ -1376,212 +1246,204 @@ impl AgentOSService {
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
-    // === ANALYTICS (ported from FORGE) ===
+    // === ANALYTICS (10 tools) ===
 
     #[tool(description = "Log a tool call for analytics tracking. Auto-parses MCP name from tool_name.")]
     async fn log_tool_call(&self, Parameters(req): Parameters<LogToolCallRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::analytics::log_tool_call(&req.pane_id, &req.tool_name, req.input_size.unwrap_or(0), req.output_size.unwrap_or(0),
-            req.latency_ms, req.success.unwrap_or(true), req.error_preview.as_deref());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::analytics_tools::log_tool_call(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Log a file operation (read/write/edit/delete) for tracking.")]
     async fn log_file_op(&self, Parameters(req): Parameters<LogFileOpRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::analytics::log_file_op(&req.pane_id, &req.file_path, &req.operation, req.lines_changed);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::analytics_tools::log_file_op(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Log token usage and costs for a model interaction.")]
     async fn log_tokens(&self, Parameters(req): Parameters<LogTokensRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::analytics::log_tokens(&req.pane_id, &req.model, req.input_tokens, req.output_tokens,
-            req.cache_read.unwrap_or(0), req.cache_write.unwrap_or(0));
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::analytics_tools::log_tokens(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Log a git commit with stats (files changed, insertions, deletions).")]
     async fn log_git_commit(&self, Parameters(req): Parameters<LogGitCommitRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::analytics::log_git_commit(&req.pane_id, &req.project, &req.repo_path.unwrap_or_default(),
-            &req.commit_hash, &req.branch.unwrap_or_default(), &req.message,
-            req.files_changed.unwrap_or(0), req.insertions.unwrap_or(0), req.deletions.unwrap_or(0));
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::analytics_tools::log_git_commit(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Get usage report: tool calls, errors, file ops over N days.")]
     async fn usage_report(&self, Parameters(req): Parameters<UsageReportRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::analytics::usage_report(req.pane_id.as_deref(), req.project.as_deref(), req.days.unwrap_or(7));
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::analytics_tools::usage_report(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Rank tools by usage count, error rate, and average latency.")]
     async fn tool_ranking(&self, Parameters(req): Parameters<ToolRankingRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::analytics::tool_ranking(req.project.as_deref(), req.days.unwrap_or(7), req.limit.unwrap_or(20));
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::analytics_tools::tool_ranking(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Check MCP server health: error rates grouped by MCP server.")]
     async fn mcp_health(&self, Parameters(req): Parameters<McpHealthRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::analytics::mcp_health(req.days.unwrap_or(7));
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::analytics_tools::mcp_health(req.days.unwrap_or(7));
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Get chronological activity feed for an agent (tool calls, file ops, commits).")]
     async fn agent_activity(&self, Parameters(req): Parameters<AgentActivityRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::analytics::agent_activity(&req.pane_id, req.limit.unwrap_or(50));
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::analytics_tools::agent_activity(&req.pane_id, req.limit.unwrap_or(50));
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Get token cost report broken down by model with cache analysis.")]
     async fn cost_report(&self, Parameters(req): Parameters<CostReportRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::analytics::cost_report(req.project.as_deref(), req.days.unwrap_or(30));
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::analytics_tools::cost_report(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Get time-series metrics with daily/weekly/monthly granularity.")]
     async fn trends(&self, Parameters(req): Parameters<TrendsRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::analytics::trends(&req.metric, req.project.as_deref(), &req.granularity.unwrap_or_else(|| "daily".into()), req.periods.unwrap_or(30));
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::analytics_tools::trends(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
-    // === QUALITY (ported from FORGE) ===
+    // === QUALITY (8 tools) ===
 
     #[tool(description = "Log test results (total, passed, failed, skipped, duration).")]
     async fn log_test(&self, Parameters(req): Parameters<LogTestRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::quality::log_test(&req.pane_id, &req.project, req.command.as_deref(), req.success,
-            req.total, req.passed, req.failed, req.skipped, req.duration_ms, req.output.as_deref());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::quality_tools::log_test(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Log build result (success, duration, output).")]
     async fn log_build(&self, Parameters(req): Parameters<LogBuildRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::quality::log_build(&req.pane_id, &req.project, req.command.as_deref(), req.success,
-            req.duration_ms, req.output.as_deref());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::quality_tools::log_build(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Log lint results (errors, warnings).")]
     async fn log_lint(&self, Parameters(req): Parameters<LogLintRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::quality::log_lint(&req.pane_id, &req.project, req.command.as_deref(), req.success,
-            req.total, req.errors, req.warnings, req.output.as_deref());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::quality_tools::log_lint(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Log deployment result (target, success, duration).")]
     async fn log_deploy(&self, Parameters(req): Parameters<LogDeployRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::quality::log_deploy(&req.pane_id, &req.project, req.target.as_deref(), req.success,
-            req.duration_ms, req.output.as_deref());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::quality_tools::log_deploy(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Get quality report: pass rates by event type over N days.")]
     async fn quality_report(&self, Parameters(req): Parameters<QualityReportRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::quality::quality_report(&req.project, req.days.unwrap_or(7));
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::quality_tools::quality_report(&req.project, req.days.unwrap_or(7));
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Quality gate: PASS/FAIL based on latest test + build results.")]
     async fn quality_gate(&self, Parameters(req): Parameters<QualityGateRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::quality::quality_gate(&req.project);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::quality_tools::quality_gate(&req.project);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Detect regressions: compare recent vs older pass rates, flag >5% drops.")]
     async fn regressions(&self, Parameters(req): Parameters<RegressionsRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::quality::regressions(&req.project, req.days.unwrap_or(14));
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::quality_tools::regressions(&req.project, req.days.unwrap_or(14));
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Project health score (0-100): test_rate*40 + build_rate*40 + (1-error_rate)*20.")]
     async fn project_health(&self, Parameters(req): Parameters<ProjectHealthRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::quality::project_health(&req.project);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::quality_tools::project_health(&req.project);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
-    // === DASHBOARD (ported from FORGE) ===
+    // === DASHBOARD (8 tools) ===
 
     #[tool(description = "God view: agents, tasks, locks, ports, quality, recent activity.")]
     async fn dash_overview(&self, Parameters(req): Parameters<DashOverviewRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::dashboard::dash_overview(req.project.as_deref());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::dashboard_tools::dash_overview(req.project.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Deep dive on one agent: status, recent tools, locks, session stats.")]
     async fn dash_agent_detail(&self, Parameters(req): Parameters<DashAgentDetailRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::dashboard::dash_agent_detail(&req.pane_id);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::dashboard_tools::dash_agent_detail(&req.pane_id);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Project view: agents, tasks, quality, commits, knowledge.")]
     async fn dash_project(&self, Parameters(req): Parameters<DashProjectRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::dashboard::dash_project(&req.project);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::dashboard_tools::dash_project(&req.project);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Agent leaderboard: ranked by tool_calls, success_rate, active_days.")]
     async fn dash_leaderboard(&self, Parameters(req): Parameters<DashLeaderboardRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::dashboard::dash_leaderboard(req.days.unwrap_or(7), req.project.as_deref());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::dashboard_tools::dash_leaderboard(req.days.unwrap_or(7), req.project.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Chronological event stream (tool calls + commits).")]
     async fn dash_timeline(&self, Parameters(req): Parameters<DashTimelineRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::dashboard::dash_timeline(req.project.as_deref(), req.pane_id.as_deref(), req.limit.unwrap_or(50));
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::dashboard_tools::dash_timeline(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Alerts: dead agents, high error rates, failed tests, expired locks.")]
     async fn dash_alerts(&self, Parameters(req): Parameters<DashAlertsRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::dashboard::dash_alerts(req.project.as_deref());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::dashboard_tools::dash_alerts(req.project.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "24h summary: tool_calls, errors, commits, files_touched.")]
     async fn dash_daily_digest(&self, Parameters(req): Parameters<DashDailyDigestRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::dashboard::dash_daily_digest(req.project.as_deref());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::dashboard_tools::dash_daily_digest(req.project.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "JSON data export: agents, usage, quality reports.")]
     async fn dash_export(&self, Parameters(req): Parameters<DashExportRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::dashboard::dash_export(&req.report, req.project.as_deref(), req.days.unwrap_or(30));
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::dashboard_tools::dash_export(&req.report, req.project.as_deref(), req.days.unwrap_or(30));
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     // === LIFECYCLE (heartbeat, sessions, who, lock_steal, conflict_scan) ===
 
     #[tool(description = "Send heartbeat to keep agent alive. Optionally update task/status.")]
     async fn heartbeat(&self, Parameters(req): Parameters<HeartbeatRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::heartbeat(&req.pane_id, req.task.as_deref(), req.status.as_deref());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::heartbeat(&req.pane_id, req.task.as_deref(), req.status.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Start a new tracking session for an agent.")]
     async fn session_start(&self, Parameters(req): Parameters<SessionStartRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::session_start(&req.pane_id, &req.project);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::session_start(&req.pane_id, &req.project);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "End a tracking session with summary.")]
     async fn session_end(&self, Parameters(req): Parameters<SessionEndRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::session_end(&req.session_id, &req.summary.unwrap_or_default());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::session_end(&req.session_id, &req.summary.clone().unwrap_or_default());
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "List all active agents (simple view with heartbeat status).")]
     async fn who(&self) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::who();
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::who();
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Force-steal a file lock with justification.")]
     async fn lock_steal(&self, Parameters(req): Parameters<LockStealRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::lock_steal(&req.pane_id, &req.file_path, &req.reason);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::lock_steal(&req.pane_id, &req.file_path, &req.reason);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Detect concurrent work on same files across agents.")]
     async fn conflict_scan(&self, Parameters(req): Parameters<ConflictScanRequest>) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::multi_agent::conflict_scan(req.project.as_deref());
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::multi_agent_tools::conflict_scan(req.project.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     // === DATA RETENTION ===
@@ -1592,28 +1454,15 @@ impl AgentOSService {
         Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
     }
 
-    // --- Project Intelligence ---
+    // === PROJECT INTELLIGENCE (5 tools) ===
 
     #[tool(description = "Scan ~/Projects for git repos. Auto-detects tech stacks, test/build commands, git status. Returns count of discovered projects.")]
     async fn project_scan(
         &self,
         Parameters(_req): Parameters<types::ProjectScanRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let reg = crate::scanner::scan_all();
-        let summary: Vec<serde_json::Value> = reg.projects.iter().map(|p| {
-            serde_json::json!({
-                "name": p.name,
-                "tech": p.tech,
-                "test_cmd": p.test_cmd,
-                "git_dirty": p.git_dirty,
-            })
-        }).collect();
-        let result = serde_json::json!({
-            "count": reg.projects.len(),
-            "projects": summary,
-            "last_scan": reg.last_scan,
-        });
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::scanner_tools::project_scan();
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "List all discovered projects with tech stack, health grade, git status. Filter by tech (e.g. 'rust', 'node').")]
@@ -1621,40 +1470,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<types::ProjectListRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let reg = crate::scanner::load_registry();
-        let projects: Vec<serde_json::Value> = reg.projects.iter()
-            .filter(|p| {
-                if let Some(ref tech) = req.tech {
-                    p.tech.iter().any(|t| t.contains(tech))
-                } else {
-                    true
-                }
-            })
-            .map(|p| {
-                let health = crate::quality::project_health(&p.name);
-                serde_json::json!({
-                    "name": p.name,
-                    "path": p.path,
-                    "tech": p.tech,
-                    "test_cmd": p.test_cmd,
-                    "build_cmd": p.build_cmd,
-                    "has_ci": p.has_ci,
-                    "health_grade": health.get("grade").and_then(|v| v.as_str()).unwrap_or("?"),
-                    "health_score": health.get("health_score").and_then(|v| v.as_i64()).unwrap_or(0),
-                    "git_dirty": p.git_dirty,
-                    "git_ahead": p.git_ahead,
-                    "git_behind": p.git_behind,
-                    "last_commit": p.last_commit_msg,
-                    "loc": p.loc,
-                })
-            })
-            .collect();
-        let result = serde_json::json!({
-            "count": projects.len(),
-            "projects": projects,
-            "last_scan": reg.last_scan,
-        });
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::scanner_tools::project_list(req.tech.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Full detail for one project: tech, commands, git status, health, open issues, active agents. The single source of truth for a project.")]
@@ -1662,8 +1479,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<types::ProjectDetailRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::scanner::project_detail(&req.project);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::scanner_tools::project_detail(&req.project);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Run tests for a project NOW and return pass/fail with output. Logs result to quality system.")]
@@ -1671,33 +1488,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<types::ProjectTestRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let info = match crate::scanner::project_by_name(&req.project) {
-            Some(i) => i,
-            None => return Ok(CallToolResult::success(vec![Content::text(
-                serde_json::json!({"error": format!("Project '{}' not found", req.project)}).to_string()
-            )])),
-        };
-        match crate::engine::health::run_tests(&info).await {
-            Some(result) => {
-                let json = serde_json::json!({
-                    "project": info.name,
-                    "success": result.success,
-                    "total": result.total,
-                    "passed": result.passed,
-                    "failed": result.failed,
-                    "duration_ms": result.duration_ms,
-                    "output": if result.output.len() > 2000 {
-                        format!("{}...(truncated)", &result.output[..2000])
-                    } else {
-                        result.output
-                    },
-                });
-                Ok(CallToolResult::success(vec![Content::text(json.to_string())]))
-            }
-            None => Ok(CallToolResult::success(vec![Content::text(
-                serde_json::json!({"error": "No test command available for this project"}).to_string()
-            )])),
-        }
+        let result = tools::scanner_tools::project_test(&req.project).await;
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Show dependency graph between local projects. Shows which projects depend on each other.")]
@@ -1705,29 +1497,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<types::ProjectDepsRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let reg = crate::scanner::load_registry();
-        let result = if let Some(name) = req.project {
-            if let Some(p) = reg.projects.iter().find(|p| p.name.to_lowercase() == name.to_lowercase()) {
-                let depended_on_by: Vec<&str> = reg.projects.iter()
-                    .filter(|other| other.deps.iter().any(|d| d == &p.name))
-                    .map(|other| other.name.as_str())
-                    .collect();
-                serde_json::json!({
-                    "project": p.name,
-                    "depends_on": p.deps,
-                    "depended_on_by": depended_on_by,
-                })
-            } else {
-                serde_json::json!({"error": format!("Project '{}' not found", name)})
-            }
-        } else {
-            let graph: Vec<serde_json::Value> = reg.projects.iter()
-                .filter(|p| !p.deps.is_empty())
-                .map(|p| serde_json::json!({"project": p.name, "depends_on": p.deps}))
-                .collect();
-            serde_json::json!({"dependencies": graph})
-        };
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::scanner_tools::project_deps(req.project.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     // === AUDIT TOOLS (5 tools) ===
@@ -1737,8 +1508,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<types::AuditCodeRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::audit::audit_code(&req.project);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::audit_tools::audit_code(&req.project);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Security audit: scan for hardcoded secrets, unsafe code, command injection vectors, path traversal, and dependency CVEs (via cargo audit). Returns findings by severity.")]
@@ -1746,8 +1517,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<types::AuditSecurityRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::audit::audit_security(&req.project);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::audit_tools::audit_security(&req.project);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Intent verification: check if code matches its purpose. Finds stub functions, untested modules, missing module files, and compares README claims against actual source. Optionally provide a description of intended functionality.")]
@@ -1755,9 +1526,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<types::AuditIntentRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let desc = req.description.as_deref().unwrap_or("");
-        let result = crate::audit::audit_intent(&req.project, desc);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::audit_tools::audit_intent(&req.project, req.description.as_deref().unwrap_or(""));
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Dependency health audit: check for wildcard versions, excessive dependencies, duplicate crate versions, and known vulnerabilities in Cargo.lock/package.json.")]
@@ -1765,8 +1535,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<types::AuditDepsRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::audit::audit_deps(&req.project);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::audit_tools::audit_deps(&req.project);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
     #[tool(description = "Full audit: runs code, security, intent, and dependency audits. Returns aggregate grade (A-F), findings by severity, and stores results for trend tracking. Use this for production readiness checks.")]
@@ -1774,8 +1544,8 @@ impl AgentOSService {
         &self,
         Parameters(req): Parameters<types::AuditFullRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
-        let result = crate::audit::audit_full(&req.project);
-        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+        let result = tools::audit_tools::audit_full(&req.project);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 }
 

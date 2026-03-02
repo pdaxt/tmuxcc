@@ -426,7 +426,7 @@ fn parse_session_jsonl(path: &str, max_messages: usize) -> Value {
                             }
                             arr.push(json!({"id": block["id"], "tool": block["name"], "input": summary}));
                         }}
-                        _ => {}
+                        _other => { /* Skip unknown content block types (thinking, result, etc.) */ }
                     }
                 }
             }

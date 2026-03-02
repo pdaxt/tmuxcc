@@ -1,3 +1,7 @@
+[workspace]
+members = [".", "crates/*"]
+resolver = "2"
+
 [package]
 name = "agentos"
 version = "0.1.0"
@@ -45,6 +49,13 @@ libc = "0.2"
 rusqlite = { version = "0.31", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 walkdir = "2.5.0"
+
+# Workspace crates
+agentos-types = { path = "crates/types" }
+agentos-gateway = { path = "crates/gateway" }
+
+# TOML parsing (for MCP descriptors)
+toml = "0.8"
 
 [profile.release]
 opt-level = 3

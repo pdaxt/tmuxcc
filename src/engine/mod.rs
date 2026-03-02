@@ -56,4 +56,43 @@ pub async fn start_background_tasks() {
             health::health_cycle().await;
         }
     });
+
+    // Audit cycle: run audit_full on registered projects every 30 minutes
+    tokio::spawn(async {
+        // Delay to let scanner populate registry first
+        tokio::time::sleep(std::time::Duration::from_secs(180)).await;
+        loop {
+            audit_cycle().await;
+            tokio::time::sleep(std::time::Duration::from_secs(30 * 60)).await;
+        }
+    });
+}
+
+/// Run audit_full on registered projects (max 5 per cycle).
+async fn audit_cycle() {
+    let reg = crate::scanner::load_registry();
+    let mut audited = 0;
+
+    for proj in &reg.projects {
+        if audited >= 5 { break; }
+
+        // Run audit in a blocking task since it does filesystem I/O
+        let path = proj.path.clone();
+        let name = proj.name.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            crate::audit::audit_full(&path)
+        }).await;
+
+        match result {
+            Ok(report) => {
+                let grade = report.get("grade").and_then(|v| v.as_str()).unwrap_or("?");
+                let total = report.get("total_findings").and_then(|v| v.as_i64()).unwrap_or(0);
+                tracing::info!("Audit cycle: {} grade={} findings={}", name, grade, total);
+            }
+            Err(e) => {
+                tracing::warn!("Audit cycle: {} failed: {}", name, e);
+            }
+        }
+        audited += 1;
+    }
 }

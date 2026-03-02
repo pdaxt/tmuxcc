@@ -722,7 +722,7 @@ pub async fn digest(app: &App, req: DigestRequest) -> String {
             "spawn" => spawns += 1,
             "complete" => completions += 1,
             "kill" => kills += 1,
-            _ => {}
+            other => { tracing::trace!("Unknown activity event: {}", other); }
         }
         if entry.summary.to_lowercase().contains("error") { errors += 1; }
         if entry.event == "spawn" {

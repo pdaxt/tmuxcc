@@ -123,3 +123,45 @@ pub fn timeline_generate(space: &str, milestone: &str) -> String {
     let result = crate::tracker::timeline_generate(space, milestone);
     result.to_string()
 }
+
+// ── Process Management ──
+
+/// Start a process from a checklist template
+pub fn process_start(req: &ProcessStartRequest) -> String {
+    let ctx = req.context.clone().unwrap_or(serde_json::json!({}));
+    crate::tracker::process_start(&req.space, &req.template_name, &ctx).to_string()
+}
+
+/// Update a process step
+pub fn process_update(req: &ProcessUpdateRequest) -> String {
+    crate::tracker::process_update(
+        &req.space, &req.process_id, req.step_index, req.done.unwrap_or(true),
+    ).to_string()
+}
+
+/// List processes in a space
+pub fn process_list(space: &str) -> String {
+    crate::tracker::process_list(space).to_string()
+}
+
+/// Create a checklist template
+pub fn process_template_create(name: &str, content: &str) -> String {
+    crate::tracker::process_template_create(name, content).to_string()
+}
+
+// ── Feature Management ──
+
+/// List child issues of a parent
+pub fn issue_children(space: &str, parent_id: &str) -> String {
+    crate::tracker::issue_children(space, parent_id).to_string()
+}
+
+/// Decompose a feature into micro-features
+pub fn feature_decompose(space: &str, parent_id: &str, children: &[serde_json::Value]) -> String {
+    crate::tracker::feature_decompose(space, parent_id, children).to_string()
+}
+
+/// Hierarchical feature status
+pub fn feature_status(space: &str, feature_id: &str) -> String {
+    crate::tracker::feature_status(space, feature_id).to_string()
+}

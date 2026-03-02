@@ -2,6 +2,25 @@
 //!
 //! Each sub-module owns a domain; all re-exported here so callers
 //! continue to use `tools::spawn`, `tools::dashboard`, etc.
+//!
+//! ## Module Map
+//! - `helpers` — shared utilities (json_err, truncate, workspace prep, git finalize)
+//! - `panes` — agent lifecycle (spawn, kill, restart, reassign, assign, collect, complete)
+//! - `config_tools` — configuration (set_mcps, set_preamble, config_show)
+//! - `routing` — MCP discovery (mcp_list, mcp_route, mcp_search)
+//! - `git_tools` — git isolation (sync, status, push, pr, merge)
+//! - `queue_tools` — task queue + auto-cycle
+//! - `monitoring` — observability (status, dashboard, logs, health, monitor, watch, digest)
+//! - `tracker_tools` — issue tracking (CRUD, milestones, processes, features)
+//! - `multi_agent_tools` — coordination (ports, agents, locks, branches, builds, tasks, KB, messaging)
+//! - `collab_tools` — collaboration (spaces, docs CRUD, proposals, comments)
+//! - `knowledge_tools` — knowledge graph, session replay, TruthGuard facts
+//! - `capacity_tools` — sprint planning (configure, estimate, log work, burndown, velocity)
+//! - `analytics_tools` — usage tracking (tool calls, file ops, tokens, commits, reports)
+//! - `quality_tools` — quality gates (test, build, lint, deploy logging; regressions, health)
+//! - `dashboard_tools` — rich dashboards (overview, agent detail, leaderboard, timeline, alerts)
+//! - `scanner_tools` — project intelligence (scan, list, detail, test, deps)
+//! - `audit_tools` — code audit (code, security, intent, deps, full)
 
 pub mod helpers;
 pub mod panes;
@@ -11,6 +30,15 @@ pub mod git_tools;
 pub mod queue_tools;
 pub mod monitoring;
 pub mod tracker_tools;
+pub mod multi_agent_tools;
+pub mod collab_tools;
+pub mod knowledge_tools;
+pub mod capacity_tools;
+pub mod analytics_tools;
+pub mod quality_tools;
+pub mod dashboard_tools;
+pub mod scanner_tools;
+pub mod audit_tools;
 
 // ── Re-exports (flat namespace for backward compat) ──
 

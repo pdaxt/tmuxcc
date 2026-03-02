@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use crate::app::App;
+use crate::audit;
 use crate::config;
 use crate::capacity;
 use crate::queue;
@@ -112,6 +113,37 @@ pub struct IntelSnapshot {
     pub top_tools: Vec<(String, f64)>,           // (tool_name, weight)
 }
 
+/// Audit snapshot for a single project
+pub struct AuditProjectSummary {
+    pub name: String,
+    pub grade: String,
+    pub critical: usize,
+    pub high: usize,
+    pub medium: usize,
+    pub low: usize,
+    pub info: usize,
+    pub total: usize,
+    pub last_audit: String,
+    pub top_findings: Vec<(String, String, String, usize)>, // (severity, category, file, line)
+}
+
+/// Aggregate audit snapshot
+pub struct AuditSnapshot {
+    pub projects: Vec<AuditProjectSummary>,
+    pub total_critical: usize,
+    pub total_high: usize,
+    pub worst_grade: String,
+}
+
+/// Action log entry for TUI command history
+#[derive(Clone)]
+pub struct ActionLogEntry {
+    pub timestamp: String,
+    pub tool: String,
+    pub success: bool,
+    pub summary: String,
+}
+
 /// Full dashboard snapshot
 pub struct DashboardData {
     pub panes: Vec<PaneSnapshot>,
@@ -141,6 +173,8 @@ pub struct DashboardData {
     pub feature_cursor: usize,
     pub infra: InfraSnapshot,
     pub intel: IntelSnapshot,
+    pub audit: AuditSnapshot,
+    pub action_log: Vec<ActionLogEntry>,
 }
 
 /// Collect all data in one pass (lock once, release)
@@ -305,6 +339,9 @@ pub fn collect_data(app: &App, selected: u8, view_mode: ViewMode, feature_cursor
         IntelSnapshot { kgraph_entities: 0, kgraph_edges: 0, kgraph_top: Vec::new(), facts: Vec::new(), fact_count: 0, replay_sessions: 0, replay_tool_calls: 0, replay_errors: 0, top_tools: Vec::new() }
     };
 
+    // Audit data — always collect (header badge needs it)
+    let audit_data = collect_audit();
+
     // Started timestamps from state
     let started_at: Vec<(u8, String)> = panes.iter()
         .filter(|p| p.status == "active")
@@ -342,6 +379,8 @@ pub fn collect_data(app: &App, selected: u8, view_mode: ViewMode, feature_cursor
         feature_cursor,
         infra,
         intel,
+        audit: audit_data,
+        action_log: Vec::new(),
     }
 }
 
@@ -672,6 +711,87 @@ fn collect_intel() -> IntelSnapshot {
     }
 }
 
+/// Collect audit snapshots from stored results
+fn collect_audit() -> AuditSnapshot {
+    let project_names = audit::list_audited_projects();
+    let mut projects = Vec::new();
+    let mut total_critical = 0usize;
+    let mut total_high = 0usize;
+    let mut worst_grade = "A".to_string();
+
+    let grade_order = |g: &str| -> u8 {
+        match g { "F" => 0, "D" => 1, "C" => 2, "B" => 3, "A" => 4, _ => 5 }
+    };
+
+    for name in &project_names {
+        if let Some(report) = audit::load_latest_audit(name) {
+            let grade = report.get("grade").and_then(|v| v.as_str()).unwrap_or("?").to_string();
+            let empty_obj = serde_json::json!({});
+            let by_sev = report.get("by_severity").unwrap_or(&empty_obj);
+            let critical = by_sev.get("critical").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let high = by_sev.get("high").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let medium = by_sev.get("medium").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let low = by_sev.get("low").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let info = by_sev.get("info").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+            let total = report.get("total_findings").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+
+            total_critical += critical;
+            total_high += high;
+            if grade_order(&grade) < grade_order(&worst_grade) {
+                worst_grade = grade.clone();
+            }
+
+            // Extract top findings (critical/high/medium only, max 5)
+            let mut top_findings: Vec<(String, String, String, usize)> = Vec::new();
+            for audit_type in &["code", "security", "intent", "deps"] {
+                if let Some(sub) = report.get(*audit_type) {
+                    if let Some(findings) = sub.get("findings").and_then(|f| f.as_array()) {
+                        for f in findings {
+                            let sev = f.get("severity").and_then(|v| v.as_str()).unwrap_or("info");
+                            if sev == "critical" || sev == "high" || sev == "medium" {
+                                top_findings.push((
+                                    sev.to_string(),
+                                    f.get("category").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                    f.get("file").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                                    f.get("line").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            top_findings.sort_by_key(|(sev, _, _, _)| match sev.as_str() {
+                "critical" => 0, "high" => 1, "medium" => 2, _ => 3,
+            });
+            top_findings.truncate(5);
+
+            // Last audit time from file modification
+            let audit_path = config::agentos_root().join("audits").join(name).join("latest.json");
+            let last_audit = std::fs::metadata(&audit_path)
+                .and_then(|m| m.modified())
+                .ok()
+                .map(|t| {
+                    let dt: chrono::DateTime<chrono::Utc> = t.into();
+                    dt.format("%Y-%m-%dT%H:%M:%SZ").to_string()
+                })
+                .map(|ts| format_relative_time(&ts))
+                .unwrap_or_else(|| "?".to_string());
+
+            projects.push(AuditProjectSummary {
+                name: name.clone(), grade, critical, high, medium, low, info, total,
+                last_audit, top_findings,
+            });
+        }
+    }
+
+    projects.sort_by(|a, b| {
+        grade_order(&a.grade).cmp(&grade_order(&b.grade))
+            .then(b.total.cmp(&a.total))
+    });
+
+    AuditSnapshot { projects, total_critical, total_high, worst_grade }
+}
+
 /// Format ISO timestamp to relative time ("3m ago", "2h ago", "1d ago")
 fn format_relative_time(ts: &str) -> String {
     if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(ts, "%Y-%m-%dT%H:%M:%S%.fZ")
@@ -886,6 +1006,46 @@ pub fn render(f: &mut Frame, data: &DashboardData) {
             render_queue(f, right[1], data);
             render_help_bar(f, chunks[3], data);
         }
+        ViewMode::Audit => {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Length(alert_height),
+                    Constraint::Min(10),
+                    Constraint::Length(8),
+                    Constraint::Length(1),
+                ])
+                .split(f.area());
+
+            let panels = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+                .split(chunks[2]);
+
+            render_header(f, chunks[0], data);
+            if alert_height > 0 { render_alert_bar(f, chunks[1], data); }
+            render_audit_summary(f, panels[0], data);
+            render_audit_findings(f, panels[1], data);
+            render_queue(f, chunks[3], data);
+            render_help_bar(f, chunks[4], data);
+        }
+        ViewMode::Log => {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Length(alert_height),
+                    Constraint::Min(10),
+                    Constraint::Length(1),
+                ])
+                .split(f.area());
+
+            render_header(f, chunks[0], data);
+            if alert_height > 0 { render_alert_bar(f, chunks[1], data); }
+            render_action_log_view(f, chunks[2], data);
+            render_help_bar(f, chunks[3], data);
+        }
         ViewMode::Normal => {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
@@ -939,6 +1099,8 @@ fn render_header(f: &mut Frame, area: Rect, data: &DashboardData) {
         ViewMode::Projects => Span::styled(" PROJ ", Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)),
         ViewMode::Infra => Span::styled(" INFRA ", Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD)),
         ViewMode::Intel => Span::styled(" INTEL ", Style::default().fg(Color::Black).bg(Color::Blue).add_modifier(Modifier::BOLD)),
+        ViewMode::Audit => Span::styled(" AUDIT ", Style::default().fg(Color::Black).bg(Color::Red).add_modifier(Modifier::BOLD)),
+        ViewMode::Log => Span::styled(" LOG ", Style::default().fg(Color::Black).bg(Color::White).add_modifier(Modifier::BOLD)),
     };
 
     let header = Line::from(vec![
@@ -970,6 +1132,15 @@ fn render_header(f: &mut Frame, area: Rect, data: &DashboardData) {
         Span::styled(format!("{}d", data.queue_done), Style::default().fg(Color::Blue)),
         if data.queue_failed > 0 {
             Span::styled(format!("·{}f", data.queue_failed), Style::default().fg(Color::Red))
+        } else {
+            Span::raw("")
+        },
+        if !data.audit.projects.is_empty() {
+            let gc = match data.audit.worst_grade.as_str() {
+                "A" => Color::Green, "B" => Color::Cyan, "C" => Color::Yellow,
+                "D" | "F" => Color::Red, _ => Color::DarkGray,
+            };
+            Span::styled(format!(" │ Aud {}", data.audit.worst_grade), Style::default().fg(gc).add_modifier(Modifier::BOLD))
         } else {
             Span::raw("")
         },
@@ -1784,6 +1955,84 @@ fn render_intel_replay(f: &mut Frame, area: Rect, data: &DashboardData) {
     f.render_widget(Paragraph::new(lines).block(block), area);
 }
 
+fn render_audit_summary(f: &mut Frame, area: Rect, data: &DashboardData) {
+    let available = area.height.saturating_sub(2) as usize;
+    let lines: Vec<Line> = if data.audit.projects.is_empty() {
+        vec![Line::from(Span::styled(
+            "  No audits yet. Run audit_full or wait for background cycle.",
+            Style::default().fg(Color::DarkGray),
+        ))]
+    } else {
+        let mut result = vec![
+            Line::from(vec![
+                Span::styled("  Project       ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Grade ", Style::default().fg(Color::DarkGray)),
+                Span::styled("C  H  M  L   I   Total ", Style::default().fg(Color::DarkGray)),
+                Span::styled("Ago", Style::default().fg(Color::DarkGray)),
+            ]),
+        ];
+        for proj in data.audit.projects.iter().take(available.saturating_sub(1)) {
+            let gc = match proj.grade.as_str() {
+                "A" => Color::Green, "B" => Color::Cyan, "C" => Color::Yellow,
+                "D" | "F" => Color::Red, _ => Color::DarkGray,
+            };
+            result.push(Line::from(vec![
+                Span::styled(format!("  {:<14}", widgets::truncate_pub(&proj.name, 14)), Style::default().fg(Color::White)),
+                Span::styled(format!("  {}   ", proj.grade), Style::default().fg(gc).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("{}  ", proj.critical), Style::default().fg(if proj.critical > 0 { Color::Red } else { Color::DarkGray })),
+                Span::styled(format!("{}  ", proj.high), Style::default().fg(if proj.high > 0 { Color::Yellow } else { Color::DarkGray })),
+                Span::styled(format!("{}  ", proj.medium), Style::default().fg(if proj.medium > 0 { Color::White } else { Color::DarkGray })),
+                Span::styled(format!("{:<3}", proj.low), Style::default().fg(Color::DarkGray)),
+                Span::styled(format!("{:<4}", proj.info), Style::default().fg(Color::DarkGray)),
+                Span::styled(format!("{:>5} ", proj.total), Style::default().fg(Color::White)),
+                Span::styled(proj.last_audit.clone(), Style::default().fg(Color::DarkGray)),
+            ]));
+        }
+        result
+    };
+    let block = Block::default()
+        .title(" Audit Summary ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Red));
+    f.render_widget(Paragraph::new(lines).block(block), area);
+}
+
+fn render_audit_findings(f: &mut Frame, area: Rect, data: &DashboardData) {
+    let available = area.height.saturating_sub(2) as usize;
+    let mut lines: Vec<Line> = Vec::new();
+
+    if data.audit.projects.is_empty() {
+        lines.push(Line::from(Span::styled("  Waiting for audit results...", Style::default().fg(Color::DarkGray))));
+    } else {
+        for proj in &data.audit.projects {
+            if lines.len() >= available { break; }
+            if proj.top_findings.is_empty() { continue; }
+            lines.push(Line::from(vec![
+                Span::styled(format!("  {} ", proj.name), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("(grade {})", proj.grade), Style::default().fg(Color::DarkGray)),
+            ]));
+            for (sev, cat, file, line_num) in &proj.top_findings {
+                if lines.len() >= available { break; }
+                let sc = match sev.as_str() {
+                    "critical" => Color::Red, "high" => Color::Yellow, "medium" => Color::White, _ => Color::DarkGray,
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(format!("    {:>8} ", sev), Style::default().fg(sc).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!("{:<15} ", widgets::truncate_pub(cat, 15)), Style::default().fg(Color::Cyan)),
+                    Span::styled(format!("{}:{}", widgets::truncate_pub(file, 30), line_num), Style::default().fg(Color::DarkGray)),
+                ]));
+            }
+        }
+    }
+
+    let title = format!(" Top Findings ({} crit, {} high) ", data.audit.total_critical, data.audit.total_high);
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow));
+    f.render_widget(Paragraph::new(lines).block(block), area);
+}
+
 fn render_help_bar(f: &mut Frame, area: Rect, data: &DashboardData) {
     let help = if data.view_mode == ViewMode::Features {
         Line::from(vec![
@@ -1837,6 +2086,10 @@ fn render_help_bar(f: &mut Frame, area: Rect, data: &DashboardData) {
             Span::styled("nfra ", Style::default().fg(Color::DarkGray)),
             Span::styled("[g]", Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)),
             Span::styled("intel ", Style::default().fg(Color::DarkGray)),
+            Span::styled("[h]", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled("ealth ", Style::default().fg(Color::DarkGray)),
+            Span::styled("[l]", Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+            Span::styled("og ", Style::default().fg(Color::DarkGray)),
             Span::styled("│ ", Style::default().fg(Color::DarkGray)),
             Span::styled("[1-9]", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
             Span::styled(" ", Style::default().fg(Color::DarkGray)),
@@ -1848,4 +2101,43 @@ fn render_help_bar(f: &mut Frame, area: Rect, data: &DashboardData) {
     };
     let p = Paragraph::new(help);
     f.render_widget(p, area);
+}
+
+fn render_action_log_view(f: &mut Frame, area: Rect, data: &DashboardData) {
+    let block = Block::default()
+        .title(" Action Log ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::White));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if data.action_log.is_empty() {
+        let empty = Paragraph::new("  No actions yet. Press [:] to run MCP tools.")
+            .style(Style::default().fg(Color::DarkGray));
+        f.render_widget(empty, inner);
+        return;
+    }
+
+    let rows: Vec<Line> = data.action_log.iter().take(inner.height as usize).map(|entry| {
+        let icon = if entry.success { "+" } else { "x" };
+        let icon_color = if entry.success { Color::Green } else { Color::Red };
+        Line::from(vec![
+            Span::styled(&entry.timestamp, Style::default().fg(Color::DarkGray)),
+            Span::raw("  "),
+            Span::styled(icon, Style::default().fg(icon_color).add_modifier(Modifier::BOLD)),
+            Span::raw(" "),
+            Span::styled(
+                format!("{:<24}", if entry.tool.len() > 24 { &entry.tool[..24] } else { &entry.tool }),
+                Style::default().fg(Color::Cyan),
+            ),
+            Span::styled(
+                if entry.summary.len() > 60 { format!("{}...", &entry.summary[..57]) } else { entry.summary.clone() },
+                Style::default().fg(Color::White),
+            ),
+        ])
+    }).collect();
+
+    let paragraph = Paragraph::new(rows);
+    f.render_widget(paragraph, inner);
 }
