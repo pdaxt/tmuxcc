@@ -402,6 +402,31 @@ pub async fn auto_cycle(app: &App) -> String {
                         }
                     }
 
+                    // Inject gate results for pipeline tasks
+                    if let Some(ref pid) = task.pipeline_id {
+                        if let Some(gate) = crate::factory::get_gate_result(pid) {
+                            let mut gate_lines = vec![format!(
+                                "Quality gate: {}", if gate.passed { "PASSED" } else { "FAILED" }
+                            )];
+                            if let Some(ref b) = gate.build {
+                                gate_lines.push(format!("  Build ({}): {}", b.command,
+                                    if b.success { "PASS" } else { "FAIL" }));
+                            }
+                            if let Some(ref t) = gate.test {
+                                gate_lines.push(format!("  Test ({}): {}", t.command,
+                                    if t.success { "PASS" } else { "FAIL" }));
+                                if !t.success {
+                                    gate_lines.push(format!("  Test output: {}", &t.output.chars().take(500).collect::<String>()));
+                                }
+                            }
+                            if let Some(ref l) = gate.lint {
+                                gate_lines.push(format!("  Lint ({}): {}", l.command,
+                                    if l.success { "PASS" } else { "WARN" }));
+                            }
+                            prompt = format!("{}\n\n## Quality Gate Results\n{}", prompt, gate_lines.join("\n"));
+                        }
+                    }
+
                     let _result = panes::spawn(app, SpawnRequest {
                         pane: pane.to_string(),
                         project: task.project.clone(),
