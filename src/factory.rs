@@ -248,6 +248,9 @@ pub fn create_pipeline(
         prev_group_ids = group_ids;
     }
 
+    log_pipeline_event(&pipeline_id, "created",
+        &format!("template={}, stages={}, project={}", template_name, task_ids.len(), project));
+
     Ok((pipeline_id, task_ids))
 }
 
@@ -293,75 +296,8 @@ fn gen_pipeline_id() -> String {
 // ============================================================
 
 /// List all pipelines, derived from queue tasks grouped by pipeline_id.
-pub fn list_pipelines() -> Vec<PipelineView> {
-    let q = queue::load_queue();
-    let mut map: HashMap<String, Vec<&queue::QueueTask>> = HashMap::new();
-
-    for task in &q.tasks {
-        if let Some(ref pid) = task.pipeline_id {
-            map.entry(pid.clone()).or_default().push(task);
-        }
-    }
-
-    let mut pipelines: Vec<PipelineView> = map.into_iter().map(|(pid, tasks)| {
-        let stages: Vec<StageView> = tasks.iter().map(|t| {
-            let name = t.task.strip_prefix('[')
-                .and_then(|s| s.split(']').next())
-                .unwrap_or("?")
-                .to_string();
-
-            let summary = t.result.as_ref().map(|r| r.chars().take(60).collect());
-
-            StageView {
-                name,
-                role: t.role.clone(),
-                task_id: t.id.clone(),
-                status: format!("{:?}", t.status).to_lowercase(),
-                pane: t.pane,
-                summary,
-            }
-        }).collect();
-
-        let project = tasks.first().map(|t| t.project.clone()).unwrap_or_default();
-        let description = tasks.first()
-            .map(|t| t.task.split(']').last().unwrap_or(&t.task).trim().to_string())
-            .unwrap_or_default();
-        let created_at = tasks.first().map(|t| t.added_at.clone()).unwrap_or_default();
-
-        let status = if tasks.iter().any(|t| t.status == queue::QueueStatus::Failed) {
-            "failed"
-        } else if tasks.iter().all(|t| t.status == queue::QueueStatus::Done) {
-            "done"
-        } else if tasks.iter().any(|t| t.status == queue::QueueStatus::Running) {
-            "running"
-        } else {
-            "pending"
-        }.to_string();
-
-        let stage_names: Vec<&str> = stages.iter().map(|s| s.name.as_str()).collect();
-        let template = if stage_names.iter().any(|n| *n == "pentest") { "secure" }
-            else if stage_names.iter().any(|n| *n == "review") { "full" }
-            else if stage_names.len() <= 2 { "quick" }
-            else { "custom" }.to_string();
-
-        PipelineView { id: pid, project, description, template, created_at, status, stages }
-    }).collect();
-
-    pipelines.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    pipelines
-}
-
-/// Get a single pipeline by ID. Direct lookup — only loads tasks for this pipeline.
-pub fn get_pipeline(pipeline_id: &str) -> Option<PipelineView> {
-    let q = queue::load_queue();
-    let tasks: Vec<&queue::QueueTask> = q.tasks.iter()
-        .filter(|t| t.pipeline_id.as_deref() == Some(pipeline_id))
-        .collect();
-
-    if tasks.is_empty() {
-        return None;
-    }
-
+/// Build a PipelineView from a list of tasks sharing a pipeline_id.
+fn build_pipeline_view(id: String, tasks: &[&queue::QueueTask]) -> PipelineView {
     let stages: Vec<StageView> = tasks.iter().map(|t| {
         let name = t.task.strip_prefix('[')
             .and_then(|s| s.split(']').next())
@@ -400,7 +336,39 @@ pub fn get_pipeline(pipeline_id: &str) -> Option<PipelineView> {
         else if stage_names.len() <= 2 { "quick" }
         else { "custom" }.to_string();
 
-    Some(PipelineView { id: pipeline_id.to_string(), project, description, template, created_at, status, stages })
+    PipelineView { id, project, description, template, created_at, status, stages }
+}
+
+pub fn list_pipelines() -> Vec<PipelineView> {
+    let q = queue::load_queue();
+    let mut map: HashMap<String, Vec<&queue::QueueTask>> = HashMap::new();
+
+    for task in &q.tasks {
+        if let Some(ref pid) = task.pipeline_id {
+            map.entry(pid.clone()).or_default().push(task);
+        }
+    }
+
+    let mut pipelines: Vec<PipelineView> = map.into_iter()
+        .map(|(pid, tasks)| build_pipeline_view(pid, &tasks))
+        .collect();
+
+    pipelines.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    pipelines
+}
+
+/// Get a single pipeline by ID. Direct lookup — only loads tasks for this pipeline.
+pub fn get_pipeline(pipeline_id: &str) -> Option<PipelineView> {
+    let q = queue::load_queue();
+    let tasks: Vec<&queue::QueueTask> = q.tasks.iter()
+        .filter(|t| t.pipeline_id.as_deref() == Some(pipeline_id))
+        .collect();
+
+    if tasks.is_empty() {
+        return None;
+    }
+
+    Some(build_pipeline_view(pipeline_id.to_string(), &tasks))
 }
 
 /// Cancel a pipeline: mark all pending/blocked stages as failed, return running pane IDs for killing.
@@ -434,6 +402,8 @@ pub fn cancel_pipeline(pipeline_id: &str) -> Result<CancelResult> {
     }
 
     queue::save_queue(&q)?;
+    log_pipeline_event(pipeline_id, "cancelled",
+        &format!("cancelled={}, killed_panes={:?}", cancelled, running_panes));
 
     Ok(CancelResult {
         pipeline_id: pipeline_id.to_string(),
@@ -447,6 +417,91 @@ pub struct CancelResult {
     pub pipeline_id: String,
     pub cancelled_tasks: u32,
     pub running_panes: Vec<u8>,
+}
+
+/// Retry failed stages in a pipeline: reset failed tasks back to pending.
+pub fn retry_pipeline(pipeline_id: &str) -> Result<RetryResult> {
+    let mut q = queue::load_queue();
+    let mut retried = 0u32;
+    let mut task_ids: Vec<String> = Vec::new();
+
+    for task in q.tasks.iter_mut() {
+        if task.pipeline_id.as_deref() != Some(pipeline_id) { continue; }
+        if task.status == queue::QueueStatus::Failed {
+            task.status = queue::QueueStatus::Pending;
+            task.retry_count += 1;
+            task.last_error = None;
+            task.pane = None;
+            task.started_at = None;
+            task.completed_at = None;
+            task.result = None;
+            task_ids.push(task.id.clone());
+            retried += 1;
+        }
+    }
+
+    if retried == 0 {
+        anyhow::bail!("No failed stages in pipeline '{}' to retry", pipeline_id);
+    }
+
+    queue::save_queue(&q)?;
+    log_pipeline_event(pipeline_id, "retry", &format!("Retried {} failed stages", retried));
+
+    Ok(RetryResult { pipeline_id: pipeline_id.to_string(), retried_tasks: retried, task_ids })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetryResult {
+    pub pipeline_id: String,
+    pub retried_tasks: u32,
+    pub task_ids: Vec<String>,
+}
+
+// ============================================================
+// Pipeline Events Log
+// ============================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PipelineEvent {
+    pub timestamp: String,
+    pub pipeline_id: String,
+    pub event: String,
+    pub detail: String,
+}
+
+/// Append an event to the pipeline events log.
+pub fn log_pipeline_event(pipeline_id: &str, event: &str, detail: &str) {
+    let entry = PipelineEvent {
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        pipeline_id: pipeline_id.to_string(),
+        event: event.to_string(),
+        detail: detail.to_string(),
+    };
+
+    let log_dir = crate::config::agentos_root().join("pipeline_events");
+    let _ = std::fs::create_dir_all(&log_dir);
+    let log_file = log_dir.join(format!("{}.jsonl", pipeline_id));
+
+    if let Ok(line) = serde_json::to_string(&entry) {
+        use std::io::Write;
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&log_file) {
+            let _ = writeln!(f, "{}", line);
+        }
+    }
+}
+
+/// Read all events for a pipeline.
+pub fn get_pipeline_events(pipeline_id: &str) -> Vec<PipelineEvent> {
+    let log_file = crate::config::agentos_root()
+        .join("pipeline_events")
+        .join(format!("{}.jsonl", pipeline_id));
+
+    match std::fs::read_to_string(&log_file) {
+        Ok(content) => content.lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect(),
+        Err(_) => Vec::new(),
+    }
 }
 
 // ============================================================
@@ -551,6 +606,13 @@ pub fn run_gate(pipeline_id: &str) -> Result<GateResult> {
     let _ = std::fs::create_dir_all(&gate_path);
     let gate_file = gate_path.join(format!("{}.json", pipeline_id));
     let _ = std::fs::write(&gate_file, serde_json::to_string_pretty(&result).unwrap_or_default());
+
+    log_pipeline_event(pipeline_id, "gate",
+        &format!("passed={}, build={}, test={}, lint={}",
+            result.passed,
+            result.build.as_ref().map(|c| c.success).unwrap_or(true),
+            result.test.as_ref().map(|c| c.success).unwrap_or(true),
+            result.lint.as_ref().map(|c| c.success).unwrap_or(true)));
 
     Ok(result)
 }
@@ -946,7 +1008,6 @@ mod tests {
 
     #[test]
     fn test_parallel_stages_are_bidirectional() {
-        // If A lists B in parallel_with, B should list A too
         for tmpl in ALL_TEMPLATES {
             for stage in tmpl.stages {
                 for parallel_name in stage.parallel_with {
@@ -960,5 +1021,98 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_retry_result_serialization() {
+        let result = RetryResult {
+            pipeline_id: "pipe_123".to_string(),
+            retried_tasks: 2,
+            task_ids: vec!["t1".to_string(), "t2".to_string()],
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        let restored: RetryResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.retried_tasks, 2);
+        assert_eq!(restored.task_ids.len(), 2);
+    }
+
+    #[test]
+    fn test_pipeline_event_serialization() {
+        let event = PipelineEvent {
+            timestamp: "2026-01-01T00:00:00Z".to_string(),
+            pipeline_id: "pipe_x".to_string(),
+            event: "created".to_string(),
+            detail: "template=full".to_string(),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        let restored: PipelineEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.event, "created");
+        assert_eq!(restored.pipeline_id, "pipe_x");
+    }
+
+    #[test]
+    fn test_pipeline_events_log_and_read() {
+        let _g = crate::queue::tests::env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("AGENTOS_ROOT", tmp.path());
+
+        // Initially empty
+        assert!(get_pipeline_events("test_pipe").is_empty());
+
+        // Log some events
+        log_pipeline_event("test_pipe", "created", "template=full, stages=4");
+        log_pipeline_event("test_pipe", "gate", "passed=true");
+
+        let events = get_pipeline_events("test_pipe");
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].event, "created");
+        assert_eq!(events[1].event, "gate");
+
+        // Different pipeline has no events
+        assert!(get_pipeline_events("other_pipe").is_empty());
+
+        std::env::remove_var("AGENTOS_ROOT");
+    }
+
+    #[test]
+    fn test_retry_pipeline_with_queue() {
+        let _g = crate::queue::tests::env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("AGENTOS_ROOT", tmp.path());
+
+        // Create tasks with pipeline_id
+        let t1 = queue::add_task_with_pipeline("p", "dev", "[dev] build", "go", 1, vec![], Some("retry_test".into())).unwrap();
+        let _t2 = queue::add_task_with_pipeline("p", "qa", "[qa] test", "go", 1, vec![t1.id.clone()], Some("retry_test".into())).unwrap();
+
+        // Fail both
+        queue::mark_failed(&t1.id, "build error").unwrap();
+        // t2 was cascade-failed by mark_failed
+
+        // Retry
+        let result = retry_pipeline("retry_test").unwrap();
+        assert_eq!(result.retried_tasks, 2);
+
+        // Verify tasks are pending again
+        let q = queue::load_queue();
+        for task in &q.tasks {
+            assert_eq!(task.status, queue::QueueStatus::Pending);
+            assert_eq!(task.retry_count, 1);
+        }
+
+        std::env::remove_var("AGENTOS_ROOT");
+    }
+
+    #[test]
+    fn test_retry_no_failed_stages() {
+        let _g = crate::queue::tests::env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("AGENTOS_ROOT", tmp.path());
+
+        queue::add_task_with_pipeline("p", "dev", "t", "go", 1, vec![], Some("no_fail".into())).unwrap();
+
+        let result = retry_pipeline("no_fail");
+        assert!(result.is_err()); // No failed stages to retry
+
+        std::env::remove_var("AGENTOS_ROOT");
     }
 }

@@ -22,6 +22,8 @@ mod engine;
 mod scanner;
 mod audit;
 mod factory;
+#[allow(dead_code)]
+mod tmux;
 
 use std::sync::Arc;
 use clap::{Parser, Subcommand};

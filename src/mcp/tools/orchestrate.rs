@@ -356,3 +356,93 @@ fn build_plan(
 
     OrchestrationPlan { tasks }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_project() -> IdentifiedProject {
+        IdentifiedProject {
+            name: "testproj".to_string(),
+            path: "/tmp/testproj".to_string(),
+            tech: vec!["rust".to_string(), "tokio".to_string()],
+        }
+    }
+
+    #[test]
+    fn test_build_plan_default_3_tasks() {
+        let plan = build_plan("add auth endpoint", &test_project(), true, false, 3);
+        assert_eq!(plan.tasks.len(), 3);
+        assert_eq!(plan.tasks[0].role, "developer");
+        assert_eq!(plan.tasks[1].role, "qa");
+        assert_eq!(plan.tasks[2].role, "security");
+    }
+
+    #[test]
+    fn test_build_plan_max_panes_1() {
+        let plan = build_plan("fix bug", &test_project(), true, false, 1);
+        assert_eq!(plan.tasks.len(), 1);
+        assert_eq!(plan.tasks[0].role, "developer");
+    }
+
+    #[test]
+    fn test_build_plan_max_panes_2() {
+        let plan = build_plan("fix bug", &test_project(), true, false, 2);
+        assert_eq!(plan.tasks.len(), 2);
+        assert_eq!(plan.tasks[1].role, "qa");
+    }
+
+    #[test]
+    fn test_build_plan_concurrent_qa_no_deps() {
+        let plan = build_plan("add feature", &test_project(), true, false, 3);
+        // QA has no deps (concurrent)
+        assert!(plan.tasks[1].depends_on.is_empty());
+        // Security depends on dev (not concurrent)
+        assert_eq!(plan.tasks[2].depends_on, vec![0]);
+    }
+
+    #[test]
+    fn test_build_plan_sequential_qa_depends_on_dev() {
+        let plan = build_plan("add feature", &test_project(), false, false, 3);
+        // QA depends on dev
+        assert_eq!(plan.tasks[1].depends_on, vec![0]);
+        // Security depends on dev
+        assert_eq!(plan.tasks[2].depends_on, vec![0]);
+    }
+
+    #[test]
+    fn test_build_plan_concurrent_security() {
+        let plan = build_plan("add feature", &test_project(), true, true, 3);
+        // Both QA and Security have no deps
+        assert!(plan.tasks[1].depends_on.is_empty());
+        assert!(plan.tasks[2].depends_on.is_empty());
+    }
+
+    #[test]
+    fn test_build_plan_dev_prompt_contains_project_info() {
+        let plan = build_plan("implement login", &test_project(), true, false, 1);
+        assert!(plan.tasks[0].prompt.contains("testproj"));
+        assert!(plan.tasks[0].prompt.contains("/tmp/testproj"));
+        assert!(plan.tasks[0].prompt.contains("rust"));
+        assert!(plan.tasks[0].prompt.contains("implement login"));
+    }
+
+    #[test]
+    fn test_build_plan_task_priorities() {
+        // Concurrent QA gets priority 2, sequential gets 1
+        let plan_concurrent = build_plan("x", &test_project(), true, false, 3);
+        assert_eq!(plan_concurrent.tasks[0].priority, 1); // dev
+        assert_eq!(plan_concurrent.tasks[1].priority, 2); // concurrent qa
+
+        let plan_sequential = build_plan("x", &test_project(), false, false, 3);
+        assert_eq!(plan_sequential.tasks[1].priority, 1); // sequential qa
+    }
+
+    #[test]
+    fn test_build_plan_max_panes_clamped() {
+        // max_panes is clamped in orchestrate() but build_plan trusts the caller
+        // Still, verify it handles edge: max_panes=6 still produces 3 tasks
+        let plan = build_plan("x", &test_project(), true, true, 6);
+        assert_eq!(plan.tasks.len(), 3); // dev + qa + security, no more
+    }
+}

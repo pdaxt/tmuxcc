@@ -205,6 +205,37 @@ pub fn factory_gate_result(req: &FactoryStatusRequest) -> String {
     }
 }
 
+/// Retry failed stages in a pipeline.
+pub fn factory_retry(req: &FactoryStatusRequest) -> String {
+    let pid = match &req.pipeline_id {
+        Some(pid) => pid,
+        None => return json_err("pipeline_id required to retry a pipeline"),
+    };
+    match factory::retry_pipeline(pid) {
+        Ok(result) => serde_json::json!({
+            "status": "retried",
+            "pipeline_id": result.pipeline_id,
+            "retried_tasks": result.retried_tasks,
+            "task_ids": result.task_ids,
+        }).to_string(),
+        Err(e) => json_err(&format!("Retry failed: {}", e)),
+    }
+}
+
+/// Get pipeline events log.
+pub fn factory_events(req: &FactoryStatusRequest) -> String {
+    let pid = match &req.pipeline_id {
+        Some(pid) => pid,
+        None => return json_err("pipeline_id required"),
+    };
+    let events = factory::get_pipeline_events(pid);
+    serde_json::json!({
+        "pipeline_id": pid,
+        "event_count": events.len(),
+        "events": events,
+    }).to_string()
+}
+
 /// Scan for conflicts in a pipeline's project.
 pub fn conflict_scan(req: &FactoryStatusRequest) -> String {
     match &req.pipeline_id {

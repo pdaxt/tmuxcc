@@ -428,88 +428,184 @@ pub async fn auto_cycle(app: &App) -> String {
         }
     }
 
-    // Phase 2: Spawn next tasks on free panes
-    if cfg.auto_assign {
-        loop {
-            let free_pane = queue::find_free_pane(&cfg, &occupied_panes);
-            let next_task = queue::next_task();
+    // Phase 1.8: Check tmux-based tasks for completion
+    {
+        let q = queue::load_queue();
+        let tmux_running: Vec<(String, String)> = q.tasks.iter()
+            .filter(|t| t.status == queue::QueueStatus::Running && t.tmux_target.is_some())
+            .map(|t| (t.id.clone(), t.tmux_target.clone().unwrap()))
+            .collect();
 
-            match (free_pane, next_task) {
-                (Some(pane), Some(task)) => {
-                    let _ = queue::mark_running(&task.id, pane);
-                    occupied_panes.push(pane);
+        for (task_id, target) in tmux_running {
+            if crate::tmux::check_done(&target) {
+                // Agent finished — capture output as result
+                let output = crate::tmux::capture_output(&target);
+                let result_text = output.lines().rev()
+                    .find(|l: &&str| !l.trim().is_empty() && !l.contains('$') && !l.contains('%'))
+                    .map(|l: &str| truncate(l.trim(), 200))
+                    .unwrap_or_else(|| "tmux-completed".into());
 
-                    let mut prompt = task.prompt.clone();
-                    if !task.depends_on.is_empty() {
-                        let mut handoff_parts = Vec::new();
-                        for dep_id in &task.depends_on {
-                            if let Some(dep_task) = queue::task_by_id(dep_id) {
-                                let result = dep_task.result.as_deref().unwrap_or("completed");
-                                handoff_parts.push(format!("- {} ({}): {}", dep_task.task, dep_id, result));
-                            }
-                            let kb = crate::multi_agent::kb_search(dep_id, Some(&task.project), Some("agent_handoff"));
-                            if let Some(entries) = kb.get("entries").and_then(|v| v.as_array()) {
-                                for entry in entries {
-                                    if let Some(content) = entry.get("content").and_then(|v| v.as_str()) {
-                                        handoff_parts.push(format!("  KB: {}", content));
+                let _ = queue::mark_done(&task_id, &result_text);
+
+                // Run quality gate for dev stage of pipeline
+                if let Some(qt) = queue::task_by_id(&task_id) {
+                    if let Some(ref pid) = qt.pipeline_id {
+                        if qt.role == "developer" {
+                            if let Ok(gate) = crate::factory::run_gate(pid) {
+                                if !gate.passed {
+                                    let q2 = queue::load_queue();
+                                    let dep_ids: Vec<String> = q2.tasks.iter()
+                                        .filter(|t| t.pipeline_id.as_deref() == Some(pid.as_str())
+                                            && t.depends_on.contains(&task_id)
+                                            && (t.status == queue::QueueStatus::Pending || t.status == queue::QueueStatus::Blocked))
+                                        .map(|t| t.id.clone())
+                                        .collect();
+                                    for dep_id in &dep_ids {
+                                        let _ = queue::mark_failed(dep_id, &format!("Quality gate failed for pipeline {}", pid));
                                     }
                                 }
                             }
                         }
-                        if !handoff_parts.is_empty() {
-                            prompt = format!("{}\n\n## Predecessor Results\n{}", prompt, handoff_parts.join("\n"));
-                        }
                     }
-
-                    // Pipeline-specific context: gate results + coordination
-                    if let Some(ref pid) = task.pipeline_id {
-                        // Inject gate results
-                        if let Some(gate) = crate::factory::get_gate_result(pid) {
-                            let mut gate_lines = vec![format!(
-                                "Quality gate: {}", if gate.passed { "PASSED" } else { "FAILED" }
-                            )];
-                            if let Some(ref b) = gate.build {
-                                gate_lines.push(format!("  Build ({}): {}", b.command,
-                                    if b.success { "PASS" } else { "FAIL" }));
-                            }
-                            if let Some(ref t) = gate.test {
-                                gate_lines.push(format!("  Test ({}): {}", t.command,
-                                    if t.success { "PASS" } else { "FAIL" }));
-                                if !t.success {
-                                    gate_lines.push(format!("  Test output: {}", &t.output.chars().take(500).collect::<String>()));
-                                }
-                            }
-                            if let Some(ref l) = gate.lint {
-                                gate_lines.push(format!("  Lint ({}): {}", l.command,
-                                    if l.success { "PASS" } else { "WARN" }));
-                            }
-                            prompt = format!("{}\n\n## Quality Gate Results\n{}", prompt, gate_lines.join("\n"));
-                        }
-
-                        // Inject coordination context
-                        let coord = crate::factory::coordination_context(pid, pane, &task.role);
-                        if !coord.is_empty() {
-                            prompt = format!("{}\n\n{}", prompt, coord);
-                        }
-                    }
-
-                    let _result = panes::spawn(app, SpawnRequest {
-                        pane: pane.to_string(),
-                        project: task.project.clone(),
-                        role: Some(task.role.clone()),
-                        task: Some(task.task.clone()),
-                        prompt: Some(prompt),
-                    }).await;
-
-                    actions.push(serde_json::json!({
-                        "action": "auto_spawn",
-                        "pane": pane,
-                        "task_id": task.id,
-                        "project": task.project,
-                        "task": truncate(&task.task, 40),
-                    }));
                 }
-                _ => break,
+
+                // Clean up tmux window
+                let _ = crate::tmux::kill_window(&target);
+                actions.push(serde_json::json!({
+                    "action": "tmux_complete",
+                    "task_id": task_id,
+                    "tmux_target": target,
+                }));
+            } else if let Some(error) = crate::tmux::check_error(&target) {
+                let _ = queue::mark_failed(&task_id, &format!("tmux error: {}", error));
+                let _ = crate::tmux::kill_window(&target);
+                actions.push(serde_json::json!({
+                    "action": "tmux_error",
+                    "task_id": task_id,
+                    "error": error,
+                }));
+            }
+        }
+    }
+
+    // Phase 2: Spawn next tasks — use tmux for pipeline tasks, PTY for standalone
+    if cfg.auto_assign {
+        loop {
+            let next_task = queue::next_task();
+            let task = match next_task {
+                Some(t) => t,
+                None => break,
+            };
+
+            // Build enriched prompt with predecessor results
+            let mut prompt = task.prompt.clone();
+            if !task.depends_on.is_empty() {
+                let mut handoff_parts = Vec::new();
+                for dep_id in &task.depends_on {
+                    if let Some(dep_task) = queue::task_by_id(dep_id) {
+                        let result = dep_task.result.as_deref().unwrap_or("completed");
+                        handoff_parts.push(format!("- {} ({}): {}", dep_task.task, dep_id, result));
+                    }
+                    let kb = crate::multi_agent::kb_search(dep_id, Some(&task.project), Some("agent_handoff"));
+                    if let Some(entries) = kb.get("entries").and_then(|v| v.as_array()) {
+                        for entry in entries {
+                            if let Some(content) = entry.get("content").and_then(|v| v.as_str()) {
+                                handoff_parts.push(format!("  KB: {}", content));
+                            }
+                        }
+                    }
+                }
+                if !handoff_parts.is_empty() {
+                    prompt = format!("{}\n\n## Predecessor Results\n{}", prompt, handoff_parts.join("\n"));
+                }
+            }
+
+            // Pipeline-specific context: gate results + coordination
+            let pane_for_coord = 0u8; // tmux doesn't use pane numbers
+            if let Some(ref pid) = task.pipeline_id {
+                if let Some(gate) = crate::factory::get_gate_result(pid) {
+                    let mut gate_lines = vec![format!(
+                        "Quality gate: {}", if gate.passed { "PASSED" } else { "FAILED" }
+                    )];
+                    if let Some(ref b) = gate.build {
+                        gate_lines.push(format!("  Build ({}): {}", b.command,
+                            if b.success { "PASS" } else { "FAIL" }));
+                    }
+                    if let Some(ref t) = gate.test {
+                        gate_lines.push(format!("  Test ({}): {}", t.command,
+                            if t.success { "PASS" } else { "FAIL" }));
+                        if !t.success {
+                            gate_lines.push(format!("  Test output: {}", &t.output.chars().take(500).collect::<String>()));
+                        }
+                    }
+                    if let Some(ref l) = gate.lint {
+                        gate_lines.push(format!("  Lint ({}): {}", l.command,
+                            if l.success { "PASS" } else { "WARN" }));
+                    }
+                    prompt = format!("{}\n\n## Quality Gate Results\n{}", prompt, gate_lines.join("\n"));
+                }
+                let coord = crate::factory::coordination_context(pid, pane_for_coord, &task.role);
+                if !coord.is_empty() {
+                    prompt = format!("{}\n\n{}", prompt, coord);
+                }
+            }
+
+            // Spawn via tmux (pipeline tasks) or PTY (standalone)
+            if task.pipeline_id.is_some() {
+                // TMUX MODE: visible, autonomous
+                let project_path = crate::config::resolve_project_path(&task.project);
+                let window_name = format!("{}-{}", task.role, task.id.chars().rev().take(6).collect::<String>().chars().rev().collect::<String>());
+
+                match crate::tmux::spawn_agent(&window_name, &project_path, &prompt) {
+                    Ok(agent) => {
+                        let _ = queue::mark_running(&task.id, 0); // 0 = tmux mode
+                        let _ = queue::set_tmux_target(&task.id, &agent.target);
+                        actions.push(serde_json::json!({
+                            "action": "tmux_spawn",
+                            "tmux_target": agent.target,
+                            "task_id": task.id,
+                            "project": task.project,
+                            "role": task.role,
+                            "task": truncate(&task.task, 40),
+                        }));
+                    }
+                    Err(e) => {
+                        let err_msg = format!("tmux spawn failed: {}", e);
+                        tracing::error!("Tmux spawn failed for {}: {}", task.id, err_msg);
+                        let _ = queue::mark_failed(&task.id, &err_msg);
+                        actions.push(serde_json::json!({
+                            "action": "tmux_spawn_error",
+                            "task_id": task.id,
+                            "error": err_msg,
+                        }));
+                    }
+                }
+            } else {
+                // PTY MODE: internal (legacy)
+                let free_pane = queue::find_free_pane(&cfg, &occupied_panes);
+                match free_pane {
+                    Some(pane) => {
+                        let _ = queue::mark_running(&task.id, pane);
+                        occupied_panes.push(pane);
+
+                        let _result = panes::spawn(app, SpawnRequest {
+                            pane: pane.to_string(),
+                            project: task.project.clone(),
+                            role: Some(task.role.clone()),
+                            task: Some(task.task.clone()),
+                            prompt: Some(prompt),
+                        }).await;
+
+                        actions.push(serde_json::json!({
+                            "action": "auto_spawn",
+                            "pane": pane,
+                            "task_id": task.id,
+                            "project": task.project,
+                            "task": truncate(&task.task, 40),
+                        }));
+                    }
+                    None => break, // No free panes
+                }
             }
         }
     }

@@ -32,10 +32,20 @@ pub async fn spawn(app: &App, req: SpawnRequest) -> String {
 
     let project_path = ws.project_path;
     let project_name = ws.project_name;
-    let spawn_cwd = ws.spawn_cwd;
+    let mut spawn_cwd = ws.spawn_cwd;
     let ws_path = ws.ws_path;
     let ws_branch = ws.ws_branch;
     let ws_base = ws.ws_base;
+
+    // Validate CWD exists — fall back to project_path to avoid posix_spawn ENOENT
+    if !std::path::Path::new(&spawn_cwd).exists() {
+        tracing::warn!("spawn_cwd does not exist: {}, falling back to project_path: {}", spawn_cwd, project_path);
+        spawn_cwd = project_path.clone();
+        // If project_path also doesn't exist, fail early with clear error
+        if !std::path::Path::new(&spawn_cwd).exists() {
+            return json_err(&format!("Neither workspace nor project path exists: {}", spawn_cwd));
+        }
+    }
 
     // Generate preamble and write as CLAUDE.md in workspace for auto-load
     let preamble = claude::generate_preamble(pane_num, theme, &project_name, &role, &task, &prompt);
@@ -45,6 +55,9 @@ pub async fn spawn(app: &App, req: SpawnRequest) -> String {
 
     // Register machine identity
     let machine_id = machine::register(pane_num);
+
+    // Resolve claude binary to absolute path (avoids PATH issues in PTY)
+    let claude_bin = resolve_claude_binary();
 
     let env_vars = vec![
         ("P".to_string(), pane_num.to_string()),
@@ -63,7 +76,7 @@ pub async fn spawn(app: &App, req: SpawnRequest) -> String {
 
     let pty_result = {
         let mut pty = app.pty_lock();
-        pty.spawn(pane_num, "claude", &claude_args, &spawn_cwd, env_vars)
+        pty.spawn(pane_num, &claude_bin, &claude_args, &spawn_cwd, env_vars)
     };
 
     let pty_status = match &pty_result {
@@ -581,4 +594,29 @@ pub async fn complete(app: &App, req: CompleteRequest) -> String {
         "summary": summary,
         "git": git_info,
     }).to_string()
+}
+
+/// Resolve "claude" to an absolute path. Checks common locations + which.
+pub fn resolve_claude_binary() -> String {
+    // Check common locations first (fastest)
+    let candidates = [
+        "/opt/homebrew/bin/claude",
+        "/usr/local/bin/claude",
+    ];
+    for path in &candidates {
+        if std::path::Path::new(path).exists() {
+            return path.to_string();
+        }
+    }
+    // Fall back to `which claude`
+    if let Ok(output) = std::process::Command::new("which").arg("claude").output() {
+        if output.status.success() {
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !path.is_empty() {
+                return path;
+            }
+        }
+    }
+    // Last resort — let PATH resolve it
+    "claude".to_string()
 }

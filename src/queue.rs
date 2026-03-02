@@ -42,6 +42,9 @@ pub struct QueueTask {
     /// Pipeline ID this task belongs to (None = standalone task)
     #[serde(default)]
     pub pipeline_id: Option<String>,
+    /// Tmux target for this task (e.g., "claude6:11.1") — set when spawned via tmux
+    #[serde(default)]
+    pub tmux_target: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -197,11 +200,22 @@ pub fn add_task_with_pipeline(project: &str, role: &str, task: &str, prompt: &st
         issue_id: None,
         space: None,
         pipeline_id,
+        tmux_target: None,
     };
 
     queue.tasks.push(new_task.clone());
     save_queue(&queue)?;
     Ok(new_task)
+}
+
+/// Set tmux_target on a running task (used by tmux integration)
+#[allow(dead_code)]
+pub fn set_tmux_target(task_id: &str, target: &str) -> Result<()> {
+    let mut queue = load_queue();
+    if let Some(t) = queue.tasks.iter_mut().find(|t| t.id == task_id) {
+        t.tmux_target = Some(target.to_string());
+    }
+    save_queue(&queue)
 }
 
 /// Get the next task to execute (highest priority pending task with no unresolved deps)
@@ -366,4 +380,229 @@ pub fn find_free_pane(cfg: &AutoConfig, occupied: &[u8]) -> Option<u8> {
         }
     }
     None
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    // Serialize tests that share AGENTOS_ROOT via process env.
+    // Public so other test modules (e.g. claude::tests) can use it.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Acquire the env-var lock. Other modules should call this before
+    /// setting AGENTOS_ROOT to avoid races.
+    pub fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        TEST_LOCK.lock().unwrap()
+    }
+
+    /// Set AGENTOS_ROOT to a fresh tempdir and reset the queue.
+    fn setup() -> (std::sync::MutexGuard<'static, ()>, tempfile::TempDir) {
+        let guard = env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("AGENTOS_ROOT", tmp.path());
+        std::fs::create_dir_all(tmp.path()).unwrap();
+        let _ = save_queue(&TaskQueue::default());
+        (guard, tmp)
+    }
+
+    #[test]
+    fn test_add_task_basic() {
+        let (_g, _d) = setup();
+        let task = add_task("proj", "developer", "build it", "go", 1, vec![]).unwrap();
+        assert_eq!(task.project, "proj");
+        assert_eq!(task.role, "developer");
+        assert_eq!(task.status, QueueStatus::Pending);
+        assert!(task.id.starts_with("t"));
+        assert!(task.pipeline_id.is_none());
+    }
+
+    #[test]
+    fn test_add_task_with_pipeline_id() {
+        let (_g, _d) = setup();
+        let task = add_task_with_pipeline(
+            "proj", "qa", "test it", "run tests", 2, vec![], Some("pipe_123".to_string()),
+        ).unwrap();
+        assert_eq!(task.pipeline_id.as_deref(), Some("pipe_123"));
+    }
+
+    #[test]
+    fn test_priority_clamping() {
+        let (_g, _d) = setup();
+        let t1 = add_task("p", "dev", "t", "p", 0, vec![]).unwrap();
+        let t2 = add_task("p", "dev", "t", "p", 10, vec![]).unwrap();
+        assert_eq!(t1.priority, 1); // clamped from 0
+        assert_eq!(t2.priority, 5); // clamped from 10
+    }
+
+    #[test]
+    fn test_next_task_priority_ordering() {
+        let (_g, _d) = setup();
+        let _low = add_task("p", "dev", "low", "p", 5, vec![]).unwrap();
+        let high = add_task("p", "dev", "high", "p", 1, vec![]).unwrap();
+        let _mid = add_task("p", "dev", "mid", "p", 3, vec![]).unwrap();
+
+        let next = next_task().unwrap();
+        assert_eq!(next.id, high.id, "Should pick highest priority (lowest number)");
+    }
+
+    #[test]
+    fn test_next_task_respects_deps() {
+        let (_g, _d) = setup();
+        let t1 = add_task("p", "dev", "first", "p", 1, vec![]).unwrap();
+        let _t2 = add_task("p", "dev", "second", "p", 1, vec![t1.id.clone()]).unwrap();
+
+        let next = next_task().unwrap();
+        assert_eq!(next.id, t1.id, "Should pick t1 since t2 has unresolved dep");
+    }
+
+    #[test]
+    fn test_mark_running() {
+        let (_g, _d) = setup();
+        let task = add_task("p", "dev", "t", "p", 1, vec![]).unwrap();
+        mark_running(&task.id, 3).unwrap();
+
+        let q = load_queue();
+        let t = q.tasks.iter().find(|t| t.id == task.id).unwrap();
+        assert_eq!(t.status, QueueStatus::Running);
+        assert_eq!(t.pane, Some(3));
+        assert!(t.started_at.is_some());
+    }
+
+    #[test]
+    fn test_mark_done_unblocks_deps() {
+        let (_g, _d) = setup();
+        let t1 = add_task("p", "dev", "first", "p", 1, vec![]).unwrap();
+        let t2 = add_task("p", "dev", "second", "p", 1, vec![t1.id.clone()]).unwrap();
+
+        // Manually block t2
+        let mut q = load_queue();
+        q.tasks.iter_mut().find(|t| t.id == t2.id).unwrap().status = QueueStatus::Blocked;
+        save_queue(&q).unwrap();
+
+        // Complete t1 → should unblock t2
+        mark_done(&t1.id, "done!").unwrap();
+
+        let q = load_queue();
+        let t1_final = q.tasks.iter().find(|t| t.id == t1.id).unwrap();
+        let t2_final = q.tasks.iter().find(|t| t.id == t2.id).unwrap();
+        assert_eq!(t1_final.status, QueueStatus::Done);
+        assert_eq!(t2_final.status, QueueStatus::Pending, "t2 should be unblocked");
+    }
+
+    #[test]
+    fn test_mark_failed_cascades() {
+        let (_g, _d) = setup();
+        let t1 = add_task("p", "dev", "root", "p", 1, vec![]).unwrap();
+        let t2 = add_task("p", "qa", "dep1", "p", 1, vec![t1.id.clone()]).unwrap();
+        let t3 = add_task("p", "sec", "dep2", "p", 1, vec![t2.id.clone()]).unwrap();
+
+        mark_failed(&t1.id, "build error").unwrap();
+
+        let q = load_queue();
+        assert_eq!(q.tasks.iter().find(|t| t.id == t1.id).unwrap().status, QueueStatus::Failed);
+        assert_eq!(q.tasks.iter().find(|t| t.id == t2.id).unwrap().status, QueueStatus::Failed);
+        assert_eq!(q.tasks.iter().find(|t| t.id == t3.id).unwrap().status, QueueStatus::Failed);
+    }
+
+    #[test]
+    fn test_requeue_failed() {
+        let (_g, _d) = setup();
+        let task = add_task("p", "dev", "t", "p", 1, vec![]).unwrap();
+        mark_failed(&task.id, "oops").unwrap();
+
+        let requeued = requeue_failed(&task.id).unwrap();
+        assert!(requeued);
+
+        let q = load_queue();
+        let t = q.tasks.iter().find(|t| t.id == task.id).unwrap();
+        assert_eq!(t.status, QueueStatus::Pending);
+        assert_eq!(t.retry_count, 1);
+    }
+
+    #[test]
+    fn test_requeue_respects_max_retries() {
+        let (_g, _d) = setup();
+        let task = add_task("p", "dev", "t", "p", 1, vec![]).unwrap();
+
+        // Fail and retry until max
+        for _ in 0..2 {
+            mark_failed(&task.id, "oops").unwrap();
+            requeue_failed(&task.id).unwrap();
+        }
+        mark_failed(&task.id, "oops again").unwrap();
+        let requeued = requeue_failed(&task.id).unwrap();
+        assert!(!requeued, "Should not requeue past max_retries");
+    }
+
+    #[test]
+    fn test_clear_tasks() {
+        let (_g, _d) = setup();
+        let t1 = add_task("p", "dev", "t1", "p", 1, vec![]).unwrap();
+        let t2 = add_task("p", "dev", "t2", "p", 1, vec![]).unwrap();
+        mark_done(&t1.id, "ok").unwrap();
+        mark_failed(&t2.id, "nope").unwrap();
+
+        let removed = clear_tasks("done").unwrap();
+        assert_eq!(removed, 1);
+
+        let q = load_queue();
+        assert_eq!(q.tasks.len(), 1);
+        assert_eq!(q.tasks[0].status, QueueStatus::Failed);
+    }
+
+    #[test]
+    fn test_find_free_pane() {
+        let cfg = AutoConfig {
+            max_parallel: 3,
+            reserved_panes: vec![2],
+            ..Default::default()
+        };
+
+        assert_eq!(find_free_pane(&cfg, &[]), Some(1));
+        assert_eq!(find_free_pane(&cfg, &[1]), Some(3)); // 2 is reserved
+        assert_eq!(find_free_pane(&cfg, &[1, 3]), None); // 2 reserved, 1+3 occupied
+    }
+
+    #[test]
+    fn test_task_for_pane() {
+        let (_g, _d) = setup();
+        let task = add_task("p", "dev", "t", "p", 1, vec![]).unwrap();
+        mark_running(&task.id, 5).unwrap();
+
+        let found = task_for_pane(5).unwrap();
+        assert_eq!(found.id, task.id);
+        assert!(task_for_pane(1).is_none());
+    }
+
+    #[test]
+    fn test_task_by_id() {
+        let (_g, _d) = setup();
+        let task = add_task("p", "dev", "t", "p", 1, vec![]).unwrap();
+        let found = task_by_id(&task.id).unwrap();
+        assert_eq!(found.project, "p");
+        assert!(task_by_id("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_queue_serialization_roundtrip() {
+        let (_g, _d) = setup();
+        add_task("proj", "dev", "build", "prompt", 2, vec![]).unwrap();
+        add_task_with_pipeline("proj", "qa", "test", "go", 1, vec![], Some("pipe_abc".into())).unwrap();
+
+        let q = load_queue();
+        assert_eq!(q.tasks.len(), 2);
+        assert_eq!(q.tasks[1].pipeline_id.as_deref(), Some("pipe_abc"));
+    }
+
+    #[test]
+    fn test_auto_config_defaults() {
+        let cfg = AutoConfig::default();
+        assert_eq!(cfg.max_parallel, 6);
+        assert!(cfg.reserved_panes.is_empty());
+        assert!(cfg.auto_complete);
+        assert!(cfg.auto_assign);
+        assert_eq!(cfg.cycle_interval_secs, 30);
+    }
 }

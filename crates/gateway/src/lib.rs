@@ -352,4 +352,120 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn test_empty_registry() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = MCPRegistry::new(dir.path().to_path_buf());
+        assert_eq!(registry.descriptor_count(), 0);
+        assert_eq!(registry.running_count(), 0);
+        assert!(registry.discover("anything").is_empty());
+        assert!(registry.list_all().is_empty());
+        assert!(registry.get_tools("nothing").is_none());
+    }
+
+    #[test]
+    fn test_discover_by_description() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut registry = MCPRegistry::new(dir.path().to_path_buf());
+        registry.register(MCPDescriptor {
+            name: "kb_mcp".to_string(),
+            command: vec!["kb".to_string()],
+            capabilities: vec!["graph".to_string()],
+            auto_start: false,
+            env: HashMap::new(),
+            description: "Knowledge base and entity storage".to_string(),
+        });
+
+        // Find by capability
+        assert_eq!(registry.discover("graph").len(), 1);
+        // Find by description
+        assert_eq!(registry.discover("knowledge").len(), 1);
+        // Find by name
+        assert_eq!(registry.discover("kb").len(), 1);
+        // Miss
+        assert!(registry.discover("payment").is_empty());
+    }
+
+    #[test]
+    fn test_list_all_shows_running_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut registry = MCPRegistry::new(dir.path().to_path_buf());
+        registry.register(MCPDescriptor {
+            name: "mcp_a".to_string(),
+            command: vec!["a".to_string()],
+            capabilities: vec![],
+            auto_start: false,
+            env: HashMap::new(),
+            description: String::new(),
+        });
+
+        let all = registry.list_all();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].0, "mcp_a");
+        assert!(!all[0].1); // not running
+    }
+
+    #[test]
+    fn test_shutdown_nonexistent() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut registry = MCPRegistry::new(dir.path().to_path_buf());
+        assert!(!registry.shutdown("nonexistent"));
+    }
+
+    #[test]
+    fn test_shutdown_all_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut registry = MCPRegistry::new(dir.path().to_path_buf());
+        registry.shutdown_all(); // Should not panic
+        assert_eq!(registry.running_count(), 0);
+    }
+
+    #[test]
+    fn test_save_and_reload_descriptor() {
+        let dir = tempfile::tempdir().unwrap();
+        let desc = MCPDescriptor {
+            name: "persist_test".to_string(),
+            command: vec!["cmd".to_string(), "--flag".to_string()],
+            capabilities: vec!["a".to_string(), "b".to_string()],
+            auto_start: true,
+            env: {
+                let mut m = HashMap::new();
+                m.insert("KEY".to_string(), "val".to_string());
+                m
+            },
+            description: "persistent test".to_string(),
+        };
+        save_descriptor(dir.path(), &desc).unwrap();
+
+        let registry = MCPRegistry::new(dir.path().to_path_buf());
+        assert_eq!(registry.descriptor_count(), 1);
+        let found = registry.discover("persist_test");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].command, vec!["cmd", "--flag"]);
+        assert!(found[0].auto_start);
+        assert_eq!(found[0].env.get("KEY").unwrap(), "val");
+    }
+
+    #[test]
+    fn test_multiple_descriptors() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..5 {
+            save_descriptor(dir.path(), &MCPDescriptor {
+                name: format!("mcp_{}", i),
+                command: vec!["cmd".to_string()],
+                capabilities: vec!["shared".to_string(), format!("unique_{}", i)],
+                auto_start: false,
+                env: HashMap::new(),
+                description: String::new(),
+            }).unwrap();
+        }
+
+        let registry = MCPRegistry::new(dir.path().to_path_buf());
+        assert_eq!(registry.descriptor_count(), 5);
+        // All share "shared" capability
+        assert_eq!(registry.discover("shared").len(), 5);
+        // Only one has "unique_3"
+        assert_eq!(registry.discover("unique_3").len(), 1);
+    }
 }

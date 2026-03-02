@@ -245,6 +245,96 @@ pub fn projects_dir() -> PathBuf {
     home_dir().join("Projects")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config() {
+        let cfg = RuntimeConfig::default();
+        assert_eq!(cfg.pane_count, 9);
+        assert_eq!(cfg.session_name, "agentos");
+        assert_eq!(cfg.web_port, 3100);
+        assert!(cfg.themes.is_empty());
+    }
+
+    #[test]
+    fn test_ensure_themes_fills_to_pane_count() {
+        let mut cfg = RuntimeConfig { pane_count: 3, ..Default::default() };
+        cfg.ensure_themes();
+        assert_eq!(cfg.themes.len(), 3);
+        assert_eq!(cfg.themes[0].name, "CYAN");
+        assert_eq!(cfg.themes[1].name, "GREEN");
+        assert_eq!(cfg.themes[2].name, "PURPLE");
+    }
+
+    #[test]
+    fn test_ensure_themes_cycles_beyond_palette() {
+        let mut cfg = RuntimeConfig { pane_count: 22, ..Default::default() };
+        cfg.ensure_themes();
+        assert_eq!(cfg.themes.len(), 22);
+        // 21st theme (index 20) wraps: 20 % 20 = 0 → CYAN
+        assert_eq!(cfg.themes[20].name, "CYAN");
+        assert_eq!(cfg.themes[21].name, "GREEN");
+    }
+
+    #[test]
+    fn test_theme_name_lookup() {
+        let mut cfg = RuntimeConfig { pane_count: 3, ..Default::default() };
+        cfg.ensure_themes();
+        assert_eq!(cfg.theme_name(1), "CYAN");
+        assert_eq!(cfg.theme_name(2), "GREEN");
+        assert_eq!(cfg.theme_name(3), "PURPLE");
+        assert_eq!(cfg.theme_name(0), "UNKNOWN"); // out of bounds
+        assert_eq!(cfg.theme_name(99), "UNKNOWN");
+    }
+
+    #[test]
+    fn test_theme_fg_lookup() {
+        let mut cfg = RuntimeConfig { pane_count: 2, ..Default::default() };
+        cfg.ensure_themes();
+        assert_eq!(cfg.theme_fg(1), "#00d4ff");
+        assert_eq!(cfg.theme_fg(0), "#ffffff"); // fallback
+    }
+
+    #[test]
+    fn test_role_short() {
+        assert_eq!(role_short("pm"), "PM");
+        assert_eq!(role_short("architect"), "ARCH");
+        assert_eq!(role_short("frontend"), "FE");
+        assert_eq!(role_short("backend"), "BE");
+        assert_eq!(role_short("qa"), "QA");
+        assert_eq!(role_short("security"), "SEC");
+        assert_eq!(role_short("code_reviewer"), "CR");
+        assert_eq!(role_short("devops"), "OPS");
+        assert_eq!(role_short("developer"), "DEV");
+        assert_eq!(role_short("unknown_role"), "--");
+    }
+
+    #[test]
+    fn test_agentos_root_env_override() {
+        let original = std::env::var("AGENTOS_ROOT").ok();
+        std::env::set_var("AGENTOS_ROOT", "/tmp/test_agentos");
+        assert_eq!(agentos_root(), PathBuf::from("/tmp/test_agentos"));
+        // Restore
+        match original {
+            Some(v) => std::env::set_var("AGENTOS_ROOT", v),
+            None => std::env::remove_var("AGENTOS_ROOT"),
+        }
+    }
+
+    #[test]
+    fn test_config_serialization_roundtrip() {
+        let mut cfg = RuntimeConfig { pane_count: 4, web_port: 9999, ..Default::default() };
+        cfg.ensure_themes();
+        let json = serde_json::to_string(&cfg).unwrap();
+        let loaded: RuntimeConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(loaded.pane_count, 4);
+        assert_eq!(loaded.web_port, 9999);
+        assert_eq!(loaded.themes.len(), 4);
+    }
+}
+
 pub fn resolve_project_path(project: &str) -> String {
     if project.starts_with('/') {
         return project.to_string();

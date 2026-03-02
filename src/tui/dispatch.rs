@@ -659,6 +659,8 @@ pub async fn dispatch_mcp_tool(app: &App, tool: &str, args: Value) -> String {
         "factory_cancel" | "pipeline_cancel" | "cancel_pipeline" => tools::factory_tools::factory_cancel(app, &deser!(args, FactoryStatusRequest)).await,
         "factory_detect" | "detect_project" => tools::factory_tools::factory_detect(&deser!(args, FactoryDetectRequest)),
         "factory_gate_result" | "gate_result" => tools::factory_tools::factory_gate_result(&deser!(args, FactoryStatusRequest)),
+        "factory_retry" | "pipeline_retry" | "retry_pipeline" => tools::factory_tools::factory_retry(&deser!(args, FactoryStatusRequest)),
+        "factory_events" | "pipeline_events" => tools::factory_tools::factory_events(&deser!(args, FactoryStatusRequest)),
 
         // === ORCHESTRATION ===
         "orchestrate" => tools::orchestrate::orchestrate(app, deser!(args, OrchestrateRequest)).await,

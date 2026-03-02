@@ -137,6 +137,13 @@ pub fn run_tui(app: Arc<App>) -> anyhow::Result<()> {
         executor_loop(exec_app, cmd_rx, result_tx).await;
     });
 
+    // Spawn background auto-cycle timer: runs every 30s when queue has work
+    let cycle_tx = cmd_tx.clone();
+    let cycle_app = Arc::clone(&app);
+    rt.spawn(async move {
+        auto_cycle_timer(cycle_app, cycle_tx).await;
+    });
+
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -169,6 +176,32 @@ async fn executor_loop(
     while let Ok(cmd) = cmd_rx.recv() {
         let result = execute_command(&app, cmd).await;
         let _ = result_tx.send(result);
+    }
+}
+
+/// Background auto-cycle timer: checks queue every 30s and triggers auto_cycle when there's work
+async fn auto_cycle_timer(
+    _app: Arc<App>,
+    cmd_tx: mpsc::Sender<TuiCommand>,
+) {
+    use crate::queue;
+    let interval = std::time::Duration::from_secs(30);
+    // Small initial delay to let TUI initialize
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+    loop {
+        tokio::time::sleep(interval).await;
+
+        // Only cycle when there's work to do
+        let q = queue::load_queue();
+        let has_pending = q.tasks.iter().any(|t| t.status == queue::QueueStatus::Pending);
+        let has_running = q.tasks.iter().any(|t| t.status == queue::QueueStatus::Running);
+
+        if has_pending || has_running {
+            if cmd_tx.send(TuiCommand::AutoCycle).is_err() {
+                break; // TUI shut down
+            }
+        }
     }
 }
 

@@ -378,6 +378,24 @@ impl AgentOSService {
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
+    #[tool(description = "Retry failed stages in a pipeline. Resets failed tasks to pending.")]
+    async fn factory_retry(
+        &self,
+        Parameters(req): Parameters<FactoryStatusRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = tools::factory_tools::factory_retry(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
+    }
+
+    #[tool(description = "Get pipeline events log. Shows all state transitions and actions.")]
+    async fn factory_events(
+        &self,
+        Parameters(req): Parameters<FactoryStatusRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = tools::factory_tools::factory_events(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
+    }
+
     // === MULTI-AGENT COORDINATION (37 tools) ===
 
     #[tool(description = "Allocate a port for a service. Finds free port in 3001-3099 range, checks for conflicts.")]

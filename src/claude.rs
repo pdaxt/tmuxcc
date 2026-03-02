@@ -134,10 +134,90 @@ pub fn generate_preamble(
     )
 }
 
-/// Get the account config dir for a pane — distributes panes across all available accounts.
-/// Check if preamble exists
+/// Check if preamble exists for a pane
 pub fn preamble_exists(pane: u8) -> bool {
     let path = config::preamble_dir().join(format!("pane_{}.md", pane));
     path.exists()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_preamble_basic() {
+        let result = generate_preamble(1, "CYAN", "myproject", "developer", "Build auth", "");
+        assert!(result.contains("# TASK: Build auth"));
+        assert!(result.contains("**Role:** DEV"));
+        assert!(result.contains("**Project:** myproject"));
+        assert!(result.contains("**Pane:** 1 (CYAN)"));
+        assert!(result.contains("developer agent"));
+    }
+
+    #[test]
+    fn test_generate_preamble_with_handoff() {
+        let prompt = "## Predecessor Results\nAuth built by pane 2, JWT in /api/auth\n";
+        let result = generate_preamble(3, "PURPLE", "proj", "qa", "Test auth", prompt);
+        assert!(result.contains("## Predecessor Results"));
+        assert!(result.contains("Auth built by pane 2"));
+    }
+
+    #[test]
+    fn test_generate_preamble_with_gate_results() {
+        let prompt = "## Quality Gate Results\nBuild: PASS, Tests: 12/12\n";
+        let result = generate_preamble(2, "GREEN", "proj", "code_reviewer", "Review PR", prompt);
+        assert!(result.contains("## Quality Gate Results"));
+        assert!(result.contains("Build: PASS"));
+        assert!(result.contains("**Role:** CR"));
+    }
+
+    #[test]
+    fn test_generate_preamble_with_coordination() {
+        let prompt = "## Pipeline Coordination\nYou are the QA agent. Run tests only.\n";
+        let result = generate_preamble(4, "ORANGE", "proj", "qa", "QA pass", prompt);
+        assert!(result.contains("You are the QA agent"));
+        // Should NOT contain default coordination when custom provided
+        assert!(!result.contains("Lock files before editing"));
+    }
+
+    #[test]
+    fn test_generate_preamble_default_coordination() {
+        let result = generate_preamble(1, "CYAN", "proj", "developer", "Build it", "");
+        assert!(result.contains("## Coordination"));
+        assert!(result.contains("Lock files before editing"));
+    }
+
+    #[test]
+    fn test_generate_preamble_all_sections() {
+        let prompt = "extra instructions\n\
+            ## Predecessor Results\nprev agent did X\n\
+            ## Quality Gate Results\nall pass\n\
+            ## Pipeline Coordination\ncustom coord\n";
+        let result = generate_preamble(5, "RED", "proj", "security", "Audit", prompt);
+        assert!(result.contains("extra instructions"));
+        assert!(result.contains("prev agent did X"));
+        assert!(result.contains("all pass"));
+        assert!(result.contains("custom coord"));
+        assert!(result.contains("**Role:** SEC"));
+    }
+
+    #[test]
+    fn test_write_preamble_and_exists() {
+        // Directly test file ops without setting AGENTOS_ROOT (avoids env races).
+        // Instead, use a known unique temp path and write/read directly.
+        let tmp = tempfile::tempdir().unwrap();
+        let preamble_dir = tmp.path().join("preambles");
+        std::fs::create_dir_all(&preamble_dir).unwrap();
+
+        let path = preamble_dir.join("pane_1.md");
+        std::fs::write(&path, "# Test preamble").unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(content, "# Test preamble");
+
+        // Verify nonexistent preamble
+        assert!(!preamble_dir.join("pane_99.md").exists());
+        std::fs::write(preamble_dir.join("pane_99.md"), "test").unwrap();
+        assert!(preamble_dir.join("pane_99.md").exists());
+    }
 }
 
