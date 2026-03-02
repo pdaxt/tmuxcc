@@ -111,9 +111,6 @@ async fn run_loop(
         system_stats.refresh();
         state.system_stats = system_stats.stats().clone();
 
-        // Refresh dashboard data periodically
-        state.refresh_dashboard_if_needed();
-
         // Draw UI
         terminal.draw(|frame| {
             let size = frame.area();
@@ -197,6 +194,9 @@ async fn run_loop(
                 }
                 if let Some(a) = update.alerts {
                     state.alerts = a;
+                }
+                if let Some(d) = update.dashboard {
+                    state.dashboard = d;
                 }
                 // Ensure selected index is valid
                 if state.selected_index >= state.agents.root_agents.len() {

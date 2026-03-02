@@ -9,6 +9,7 @@ use crate::agentos::{AgentOSClient, AgentOSQueueTask, AlertsResponse, AnalyticsD
 use crate::agents::{AgentStatus, MonitoredAgent};
 use crate::app::AgentTree;
 use crate::parsers::ParserRegistry;
+use crate::state_reader::DashboardData;
 use crate::tmux::{refresh_process_cache, TmuxClient};
 
 /// Hysteresis duration - keep "Processing" status for this long after last active detection
@@ -26,6 +27,8 @@ pub struct MonitorUpdate {
     pub digest: Option<AnalyticsDigest>,
     /// Active alerts (fetched on slow cadence)
     pub alerts: Option<AlertsResponse>,
+    /// Dashboard data (fetched on slow cadence via /api/dashboard)
+    pub dashboard: Option<DashboardData>,
 }
 
 /// Background task that monitors tmux panes and AgentOS for AI agents
@@ -89,17 +92,23 @@ impl MonitorTask {
             };
             self.was_connected = connected;
 
-            // Fetch analytics on slow cadence (~5s at 500ms poll = every 10th poll)
+            // Fetch dashboard + analytics on slow cadence (~5s at 500ms poll = every 10th poll)
             self.analytics_counter += 1;
             let mut digest = None;
             let mut alerts = None;
+            let mut dashboard = None;
             if connected && self.analytics_counter % 10 == 0 {
                 if let Some(ref client) = self.agentos_client {
-                    if let Ok(d) = client.fetch_digest().await {
-                        digest = Some(d);
-                    }
-                    if let Ok(a) = client.fetch_alerts().await {
-                        alerts = Some(a);
+                    // Single /api/dashboard call returns everything including digest + alerts
+                    match client.fetch_dashboard().await {
+                        Ok(result) => {
+                            dashboard = Some(result.dashboard);
+                            digest = Some(result.digest);
+                            alerts = Some(result.alerts);
+                        }
+                        Err(e) => {
+                            debug!("Dashboard fetch failed: {}", e);
+                        }
                     }
                 }
             }
@@ -111,6 +120,7 @@ impl MonitorTask {
                 flash,
                 digest,
                 alerts,
+                dashboard,
             };
             if self.tx.send(update).await.is_err() {
                 debug!("Monitor channel closed, stopping");

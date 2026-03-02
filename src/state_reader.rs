@@ -1,29 +1,22 @@
-//! Reads local AgentOS state files (JSON configs) for dashboard display.
+//! Dashboard data types used by the TUI.
+//! Data is fetched from hub_mcp's HTTP API by AgentOSClient — zero file reads.
 
-use chrono::{Local, NaiveDate};
-use serde_json::Value;
+use serde::Deserialize;
 use std::collections::HashMap;
-use std::path::PathBuf;
-
-fn home_dir() -> PathBuf {
-    dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"))
-}
-
-fn read_json(path: &std::path::Path) -> Option<Value> {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-}
 
 // =============================================================================
 // Capacity
 // =============================================================================
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct CapacityData {
+    #[serde(default)]
     pub acu_used: f64,
+    #[serde(default)]
     pub acu_total: f64,
+    #[serde(default)]
     pub reviews_used: u32,
+    #[serde(default)]
     pub reviews_total: u32,
 }
 
@@ -49,45 +42,6 @@ impl CapacityData {
         } else {
             "BALANCED"
         }
-    }
-}
-
-pub fn load_capacity() -> CapacityData {
-    let cap_root = home_dir().join(".config").join("capacity");
-    let cfg = read_json(&cap_root.join("config.json")).unwrap_or_default();
-
-    let pane_count = cfg.get("pane_count").and_then(|v| v.as_f64()).unwrap_or(9.0);
-    let hours = cfg.get("hours_per_day").and_then(|v| v.as_f64()).unwrap_or(8.0);
-    let factor = cfg.get("availability_factor").and_then(|v| v.as_f64()).unwrap_or(0.8);
-    let rev_bw = cfg.get("review_bandwidth").and_then(|v| v.as_u64()).unwrap_or(12) as u32;
-    let daily = pane_count * hours * factor;
-
-    let today = Local::now().format("%Y-%m-%d").to_string();
-    let log = read_json(&cap_root.join("work_log.json")).unwrap_or_default();
-    let entries = log.get("entries").and_then(|v| v.as_array());
-
-    let (acu_used, reviews) = entries
-        .map(|entries| {
-            let mut acu = 0.0;
-            let mut rev = 0u32;
-            for e in entries {
-                let logged = e.get("logged_at").and_then(|v| v.as_str()).unwrap_or("");
-                if logged.starts_with(&today) {
-                    acu += e.get("acu_spent").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                    if e.get("review_needed").and_then(|v| v.as_bool()).unwrap_or(false) {
-                        rev += 1;
-                    }
-                }
-            }
-            (acu, rev)
-        })
-        .unwrap_or((0.0, 0));
-
-    CapacityData {
-        acu_used: (acu_used * 10.0).round() / 10.0,
-        acu_total: (daily * 10.0).round() / 10.0,
-        reviews_used: reviews,
-        reviews_total: rev_bw,
     }
 }
 
@@ -117,84 +71,6 @@ impl SprintData {
     }
 }
 
-pub fn load_sprint() -> Option<SprintData> {
-    let sprint_dir = home_dir().join(".config").join("capacity").join("sprints");
-    if !sprint_dir.exists() {
-        return None;
-    }
-
-    let mut sprints: Vec<_> = std::fs::read_dir(&sprint_dir)
-        .ok()?
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().extension().map(|e| e == "json").unwrap_or(false))
-        .collect();
-    sprints.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
-
-    let data = read_json(&sprints.first()?.path())?;
-
-    let name = data
-        .get("name")
-        .or(data.get("id"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("?")
-        .to_string();
-    let space = data
-        .get("space")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-
-    let planned = data.get("planned").and_then(|v| v.as_object())?;
-    let issues = planned.get("issues").and_then(|v| v.as_array())?;
-
-    let total_issues = issues.len();
-    let done_issues = issues
-        .iter()
-        .filter(|i| {
-            i.get("status")
-                .and_then(|v| v.as_str())
-                .map(|s| s == "done")
-                .unwrap_or(false)
-                || i.get("actual_acu").is_some()
-        })
-        .count();
-
-    let total_acu: f64 = planned
-        .get("total_acu")
-        .and_then(|v| v.as_f64())
-        .unwrap_or_else(|| {
-            issues
-                .iter()
-                .map(|i| i.get("estimated_acu").and_then(|v| v.as_f64()).unwrap_or(0.0))
-                .sum()
-        });
-
-    let used_acu: f64 = issues
-        .iter()
-        .filter_map(|i| i.get("actual_acu").and_then(|v| v.as_f64()))
-        .sum();
-
-    let end_date = data.get("end_date").and_then(|v| v.as_str()).unwrap_or("");
-    let (days_left, ended) = if let Ok(end) = NaiveDate::parse_from_str(end_date, "%Y-%m-%d") {
-        let today = Local::now().date_naive();
-        let days = (end - today).num_days() + 1;
-        (days.max(0), days < 0)
-    } else {
-        (0, false)
-    };
-
-    Some(SprintData {
-        name,
-        space,
-        total_issues,
-        done_issues,
-        total_acu: (total_acu * 10.0).round() / 10.0,
-        used_acu: (used_acu * 10.0).round() / 10.0,
-        days_left,
-        ended,
-    })
-}
-
 // =============================================================================
 // Board (issues by space)
 // =============================================================================
@@ -213,46 +89,6 @@ impl BoardData {
     }
 }
 
-pub fn load_board() -> BoardData {
-    let spaces_dir = home_dir().join(".config").join("collab").join("spaces");
-    let mut spaces = Vec::new();
-
-    if let Ok(entries) = std::fs::read_dir(&spaces_dir) {
-        let mut dirs: Vec<_> = entries.filter_map(|e| e.ok()).collect();
-        dirs.sort_by_key(|e| e.file_name());
-
-        for entry in dirs {
-            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                continue;
-            }
-            let issues_dir = entry.path().join("issues");
-            if !issues_dir.exists() {
-                continue;
-            }
-            let mut counts: HashMap<String, usize> = HashMap::new();
-            if let Ok(files) = std::fs::read_dir(&issues_dir) {
-                for f in files.filter_map(|e| e.ok()) {
-                    if f.path().extension().map(|e| e == "json").unwrap_or(false) {
-                        if let Some(data) = read_json(&f.path()) {
-                            let status = data
-                                .get("status")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("backlog")
-                                .to_string();
-                            *counts.entry(status).or_insert(0) += 1;
-                        }
-                    }
-                }
-            }
-            if !counts.is_empty() {
-                spaces.push((entry.file_name().to_string_lossy().to_string(), counts));
-            }
-        }
-    }
-
-    BoardData { spaces }
-}
-
 // =============================================================================
 // MCP Servers
 // =============================================================================
@@ -264,224 +100,56 @@ pub struct McpServer {
     pub is_rust: bool,
 }
 
-fn load_tool_counts() -> HashMap<String, String> {
-    let path = home_dir()
-        .join(".cache")
-        .join("agentos-tui")
-        .join("tool_counts.json");
-    read_json(&path)
-        .and_then(|v| v.as_object().cloned())
-        .map(|obj| {
-            obj.into_iter()
-                .map(|(k, v)| {
-                    let count = v
-                        .as_u64()
-                        .map(|n| n.to_string())
-                        .or_else(|| v.as_str().map(|s| s.to_string()))
-                        .unwrap_or_else(|| "?".to_string());
-                    (k, count)
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-pub fn load_mcps() -> Vec<McpServer> {
-    let claude_json = home_dir().join(".claude.json");
-    let data = match read_json(&claude_json) {
-        Some(d) => d,
-        None => return Vec::new(),
-    };
-
-    let servers = match data.get("mcpServers").and_then(|v| v.as_object()) {
-        Some(s) => s,
-        None => return Vec::new(),
-    };
-
-    let tool_counts = load_tool_counts();
-
-    let mut result = Vec::new();
-    for (name, cfg) in servers {
-        let cmd = cfg
-            .get("command")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let is_rust = cmd.contains("target/release") || cmd.contains("mcp-mega") || cmd.contains("agentos");
-        let display_name: String = if cmd.contains("mcp-mega") || name == "mcp-mega" {
-            "mcp-mega".to_string()
-        } else if cmd.contains("agentos") || name == "agentos" {
-            "agentos".to_string()
-        } else {
-            name.chars().take(14).collect()
-        };
-        let tools = tool_counts
-            .get(&display_name)
-            .or_else(|| tool_counts.get(name))
-            .cloned()
-            .unwrap_or_else(|| "?".to_string());
-        result.push(McpServer {
-            name: display_name,
-            tools,
-            is_rust,
-        });
-    }
-    result
-}
-
 // =============================================================================
 // Activity Log
 // =============================================================================
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ActivityEntry {
+    #[serde(default)]
     pub ts: String,
+    #[serde(default)]
     pub pane: u8,
+    #[serde(default)]
     pub event: String,
+    #[serde(default)]
     pub summary: String,
-}
-
-pub fn load_activity(limit: usize) -> Vec<ActivityEntry> {
-    let state_file = home_dir().join(".config").join("agentos").join("state.json");
-    let data = match read_json(&state_file) {
-        Some(d) => d,
-        None => return Vec::new(),
-    };
-
-    data.get("activity_log")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .take(limit)
-                .filter_map(|e| {
-                    Some(ActivityEntry {
-                        ts: e.get("ts").and_then(|v| v.as_str())?.to_string(),
-                        pane: e.get("pane").and_then(|v| v.as_u64()).unwrap_or(0) as u8,
-                        event: e
-                            .get("event")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string(),
-                        summary: e
-                            .get("summary")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("")
-                            .to_string(),
-                    })
-                })
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 // =============================================================================
 // Auto-Cycle Config
 // =============================================================================
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct AutoCycleConfig {
+    #[serde(default)]
     pub max_parallel: u8,
+    #[serde(default)]
     pub reserved_panes: Vec<u8>,
+    #[serde(default)]
     pub auto_assign: bool,
+    #[serde(default)]
     pub auto_complete: bool,
+    #[serde(default)]
     pub default_role: String,
+    #[serde(default, alias = "cycle_interval_secs")]
     pub cycle_interval: u32,
-}
-
-pub fn load_auto_config() -> AutoCycleConfig {
-    let path = home_dir()
-        .join(".config")
-        .join("agentos")
-        .join("auto_config.json");
-    let data = match read_json(&path) {
-        Some(d) => d,
-        None => return AutoCycleConfig::default(),
-    };
-
-    AutoCycleConfig {
-        max_parallel: data
-            .get("max_parallel")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(4) as u8,
-        reserved_panes: data
-            .get("reserved_panes")
-            .and_then(|v| v.as_array())
-            .map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_u64().map(|n| n as u8))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        auto_assign: data
-            .get("auto_assign")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false),
-        auto_complete: data
-            .get("auto_complete")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false),
-        default_role: data
-            .get("default_role")
-            .and_then(|v| v.as_str())
-            .unwrap_or("developer")
-            .to_string(),
-        cycle_interval: data
-            .get("cycle_interval_secs")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(30) as u32,
-    }
 }
 
 // =============================================================================
 // Session State
 // =============================================================================
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct SessionData {
+    #[serde(default)]
     pub current_task: String,
+    #[serde(default)]
     pub completed: Vec<String>,
+    #[serde(default)]
     pub next_steps: Vec<String>,
+    #[serde(default)]
     pub blocked_on: Option<String>,
-}
-
-pub fn load_session() -> SessionData {
-    let path = home_dir()
-        .join(".config")
-        .join("agentos")
-        .join("session_state.json");
-    let data = match read_json(&path) {
-        Some(d) => d,
-        None => return SessionData::default(),
-    };
-
-    SessionData {
-        current_task: data
-            .get("current_task")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string(),
-        completed: data
-            .get("completed")
-            .and_then(|v| v.as_array())
-            .map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        next_steps: data
-            .get("next_steps")
-            .and_then(|v| v.as_array())
-            .map(|a| {
-                a.iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        blocked_on: data
-            .get("blocked_on")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string()),
-    }
 }
 
 // =============================================================================
@@ -496,182 +164,40 @@ pub struct MultiAgentEntry {
     pub last_update: String,
 }
 
-pub fn load_multi_agent() -> Vec<MultiAgentEntry> {
-    let path = home_dir()
-        .join(".claude")
-        .join("multi_agent")
-        .join("agents.json");
-    let data = match read_json(&path) {
-        Some(d) => d,
-        None => return Vec::new(),
-    };
-
-    let obj = match data.as_object() {
-        Some(o) => o,
-        None => return Vec::new(),
-    };
-
-    obj.iter()
-        .map(|(pane_id, info)| MultiAgentEntry {
-            pane_id: pane_id.clone(),
-            project: info
-                .get("project")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
-            task: info
-                .get("task")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
-            last_update: info
-                .get("last_update")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string(),
-        })
-        .collect()
-}
-
 // =============================================================================
 // Milestones
 // =============================================================================
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct MilestoneData {
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub space: String,
+    #[serde(default)]
     pub status: String,
+    #[serde(default)]
     pub due_date: Option<String>,
-}
-
-pub fn load_milestones() -> Vec<MilestoneData> {
-    let spaces_dir = home_dir().join(".config").join("collab").join("spaces");
-    let mut milestones = Vec::new();
-
-    if let Ok(entries) = std::fs::read_dir(&spaces_dir) {
-        for entry in entries.filter_map(|e| e.ok()) {
-            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                continue;
-            }
-            let space_name = entry.file_name().to_string_lossy().to_string();
-            let ms_dir = entry.path().join("milestones");
-            if !ms_dir.exists() {
-                continue;
-            }
-            if let Ok(files) = std::fs::read_dir(&ms_dir) {
-                for f in files.filter_map(|e| e.ok()) {
-                    if f.path().extension().map(|e| e == "json").unwrap_or(false) {
-                        if let Some(data) = read_json(&f.path()) {
-                            let status = data
-                                .get("status")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("open")
-                                .to_string();
-                            milestones.push(MilestoneData {
-                                name: data
-                                    .get("name")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("?")
-                                    .to_string(),
-                                space: space_name.clone(),
-                                status,
-                                due_date: data
-                                    .get("due_date")
-                                    .and_then(|v| v.as_str())
-                                    .map(|s| s.to_string()),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    milestones
 }
 
 // =============================================================================
 // Processes (Active Workflows)
 // =============================================================================
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ProcessData {
+    #[serde(default)]
     pub id: String,
+    #[serde(default)]
     pub template: String,
+    #[serde(default)]
     pub space: String,
+    #[serde(default)]
     pub status: String,
+    #[serde(default)]
     pub total_steps: usize,
+    #[serde(default)]
     pub completed_steps: usize,
-}
-
-pub fn load_processes() -> Vec<ProcessData> {
-    let spaces_dir = home_dir().join(".config").join("collab").join("spaces");
-    let mut processes = Vec::new();
-
-    if let Ok(entries) = std::fs::read_dir(&spaces_dir) {
-        for entry in entries.filter_map(|e| e.ok()) {
-            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                continue;
-            }
-            let space_name = entry.file_name().to_string_lossy().to_string();
-            let proc_dir = entry.path().join("processes");
-            if !proc_dir.exists() {
-                continue;
-            }
-            if let Ok(files) = std::fs::read_dir(&proc_dir) {
-                for f in files.filter_map(|e| e.ok()) {
-                    if f.path().extension().map(|e| e == "json").unwrap_or(false) {
-                        if let Some(data) = read_json(&f.path()) {
-                            let total = data
-                                .get("total_steps")
-                                .and_then(|v| v.as_u64())
-                                .unwrap_or(0) as usize;
-                            let completed = data
-                                .get("completed_steps")
-                                .and_then(|v| v.as_u64())
-                                .or_else(|| {
-                                    data.get("steps").and_then(|v| v.as_array()).map(|steps| {
-                                        steps
-                                            .iter()
-                                            .filter(|s| {
-                                                s.get("done")
-                                                    .and_then(|v| v.as_bool())
-                                                    .unwrap_or(false)
-                                            })
-                                            .count() as u64
-                                    })
-                                })
-                                .unwrap_or(0) as usize;
-
-                            processes.push(ProcessData {
-                                id: data
-                                    .get("id")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("?")
-                                    .to_string(),
-                                template: data
-                                    .get("template")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("")
-                                    .to_string(),
-                                space: space_name.clone(),
-                                status: data
-                                    .get("status")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("unknown")
-                                    .to_string(),
-                                total_steps: total,
-                                completed_steps: completed,
-                            });
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    processes
 }
 
 // =============================================================================
@@ -698,20 +224,5 @@ impl DashboardData {
             .iter()
             .filter_map(|m| m.tools.parse::<u32>().ok())
             .sum()
-    }
-}
-
-pub fn load_dashboard() -> DashboardData {
-    DashboardData {
-        capacity: load_capacity(),
-        sprint: load_sprint(),
-        board: load_board(),
-        mcps: load_mcps(),
-        activity: load_activity(8),
-        auto_config: load_auto_config(),
-        session: load_session(),
-        multi_agent: load_multi_agent(),
-        milestones: load_milestones(),
-        processes: load_processes(),
     }
 }

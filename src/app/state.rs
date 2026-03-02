@@ -123,8 +123,6 @@ pub struct AppState {
     pub dashboard: DashboardData,
     /// Whether dashboard panel is shown
     pub show_dashboard: bool,
-    /// Last dashboard refresh tick
-    pub dashboard_last_refresh: usize,
     /// 24h analytics digest from AgentOS API
     pub digest: AnalyticsDigest,
     /// Active alerts from AgentOS API
@@ -157,7 +155,6 @@ impl AppState {
             show_queue: true,
             dashboard: DashboardData::default(),
             show_dashboard: true,
-            dashboard_last_refresh: 0,
             digest: AnalyticsDigest::default(),
             alerts: AlertsResponse::default(),
         }
@@ -396,15 +393,6 @@ impl AppState {
     /// Toggles dashboard panel visibility
     pub fn toggle_dashboard(&mut self) {
         self.show_dashboard = !self.show_dashboard;
-    }
-
-    /// Refresh dashboard data from local state files (every ~5 seconds)
-    pub fn refresh_dashboard_if_needed(&mut self) {
-        // Refresh every ~62 ticks (~5s at 12fps)
-        if self.tick.wrapping_sub(self.dashboard_last_refresh) > 62 || self.dashboard_last_refresh == 0 {
-            self.dashboard = crate::state_reader::load_dashboard();
-            self.dashboard_last_refresh = self.tick;
-        }
     }
 
     /// Sets an error message
