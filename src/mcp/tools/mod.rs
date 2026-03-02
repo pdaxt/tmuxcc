@@ -50,5 +50,5 @@ pub use config_tools::{set_mcps, set_preamble, config_show};
 pub use monitoring::{status, dashboard, logs, health, monitor, project_status, digest, watch};
 pub use routing::{mcp_list, mcp_route, mcp_search};
 pub use git_tools::{git_sync, git_status_tool, git_push, git_pr, git_merge};
-pub use queue_tools::{queue_add, queue_decompose, queue_list, queue_done, auto_cycle, auto_config};
+pub use queue_tools::{queue_add, queue_decompose, queue_list, queue_done, auto_cycle, auto_config, queue_cancel, queue_retry, queue_clear};
 pub use helpers::{machine_info_tool, machine_list_tool};
