@@ -66,26 +66,56 @@ pub fn generate_preamble(
 ) -> String {
     let role_short = config::role_short(role);
 
-    // Split prompt into handoff context and regular context
-    let (regular_prompt, handoff_section) = if prompt.contains("## Predecessor Results") {
-        let parts: Vec<&str> = prompt.splitn(2, "## Predecessor Results").collect();
-        (parts[0].trim().to_string(), Some(parts.get(1).unwrap_or(&"").trim().to_string()))
-    } else {
-        (prompt.to_string(), None)
+    // Parse prompt sections: split on known headers
+    let mut regular_prompt = String::new();
+    let mut handoff_section = String::new();
+    let mut gate_section = String::new();
+    let mut coord_section = String::new();
+
+    let mut current_target = &mut regular_prompt;
+    for line in prompt.lines() {
+        if line.starts_with("## Predecessor Results") {
+            current_target = &mut handoff_section;
+            continue;
+        } else if line.starts_with("## Quality Gate Results") {
+            current_target = &mut gate_section;
+            continue;
+        } else if line.starts_with("## Pipeline Coordination") {
+            current_target = &mut coord_section;
+            continue;
+        }
+        current_target.push_str(line);
+        current_target.push('\n');
+    }
+
+    let extra = {
+        let trimmed = regular_prompt.trim();
+        if trimmed.is_empty() { String::new() }
+        else { format!("{}\n\n", trimmed) }
     };
 
-    let extra = if regular_prompt.is_empty() {
-        String::new()
-    } else {
-        format!("Additional context: {}\n\n", regular_prompt)
+    let handoff = {
+        let trimmed = handoff_section.trim();
+        if trimmed.is_empty() { String::new() }
+        else { format!("## Predecessor Results\nThese tasks completed before yours. Use their output as context:\n{}\n\n", trimmed) }
     };
 
-    let handoff = match handoff_section {
-        Some(ref ctx) if !ctx.is_empty() => format!(
-            "## Predecessor Results\nThese tasks completed before yours. Use their output as context:\n{}\n\n",
-            ctx
-        ),
-        _ => String::new(),
+    let gate = {
+        let trimmed = gate_section.trim();
+        if trimmed.is_empty() { String::new() }
+        else { format!("## Quality Gate Results\n{}\n\n", trimmed) }
+    };
+
+    let coord = {
+        let trimmed = coord_section.trim();
+        if trimmed.is_empty() {
+            "## Coordination\n\
+             - Use multi_agent MCP to register and coordinate with other agents\n\
+             - Lock files before editing shared code\n\
+             - When done: summarize what you accomplished\n".to_string()
+        } else {
+            format!("{}\n", trimmed)
+        }
     };
 
     format!(
@@ -99,10 +129,8 @@ pub fn generate_preamble(
          {task}\n\
          {extra}\
          {handoff}\
-         ## Coordination\n\
-         - Use multi_agent MCP to register and coordinate with other agents\n\
-         - Lock files before editing shared code\n\
-         - When done: summarize what you accomplished\n",
+         {gate}\
+         {coord}\n",
     )
 }
 

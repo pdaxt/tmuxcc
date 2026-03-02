@@ -105,6 +105,14 @@ pub async fn spawn(app: &App, req: SpawnRequest) -> String {
 
     update_agents_json(pane_num, &project_name, &task);
 
+    // Auto-register agent with multi_agent coordination system
+    let _ = crate::multi_agent::agent_register(
+        &pane_id_str(pane_num),
+        &project_name,
+        &task,
+        &[], // files will be claimed via lock_acquire as agent works
+    );
+
     if let Some(ref branch) = ws_branch {
         let _ = crate::multi_agent::git_claim_branch(&pane_id_str(pane_num), branch, &project_name, &task);
     }
@@ -165,6 +173,8 @@ pub async fn kill(app: &App, req: KillRequest) -> String {
         let _ = crate::multi_agent::git_release_branch(&pane_id_str(pane_num), branch, &project_name);
     }
 
+    // Deregister from coordination system + release all file locks
+    let _ = crate::multi_agent::agent_deregister(&pane_id_str(pane_num));
     machine::deregister(pane_num);
 
     let mut pane_state = pane_data;
@@ -538,6 +548,9 @@ pub async fn complete(app: &App, req: CompleteRequest) -> String {
     if let Some(ref branch) = pane_data.branch_name {
         let _ = crate::multi_agent::git_release_branch(&pane_id_str(pane_num), branch, &pane_data.project);
     }
+
+    // Deregister from coordination system + release all file locks
+    let _ = crate::multi_agent::agent_deregister(&pane_id_str(pane_num));
 
     remove_from_agents_json(pane_num);
 

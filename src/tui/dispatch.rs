@@ -652,7 +652,7 @@ pub async fn dispatch_mcp_tool(app: &App, tool: &str, args: Value) -> String {
         "factory_status" | "pipeline" | "pipe" => tools::factory_tools::factory_status(&deser!(args, FactoryStatusRequest)),
         "factory_list" | "pipelines" => tools::factory_tools::factory_list(),
         "factory_gate" | "gate" => tools::factory_tools::factory_gate(&deser!(args, FactoryStatusRequest)),
-        "conflict_scan" | "conflicts" => tools::factory_tools::conflict_scan(&deser!(args, FactoryStatusRequest)),
+        "pipeline_conflicts" => tools::factory_tools::conflict_scan(&deser!(args, FactoryStatusRequest)),
 
         // === ORCHESTRATION ===
         "orchestrate" => tools::orchestrate::orchestrate(app, deser!(args, OrchestrateRequest)).await,

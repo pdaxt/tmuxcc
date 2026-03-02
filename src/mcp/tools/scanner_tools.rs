@@ -3,8 +3,6 @@
 //! Thin wrappers over crate::scanner (and crate::engine::health for tests)
 //! so all layers route through one place.
 
-use super::super::types::*;
-
 /// Scan ~/Projects for git repos
 pub fn project_scan() -> String {
     let reg = crate::scanner::scan_all();
