@@ -220,6 +220,17 @@ CREATE TABLE IF NOT EXISTS task_deps (
     depends_on TEXT NOT NULL,
     PRIMARY KEY (task_id, depends_on)
 );
+
+CREATE TABLE IF NOT EXISTS agent_signals (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    pane_id      TEXT NOT NULL,
+    signal_type  TEXT NOT NULL,
+    message      TEXT NOT NULL DEFAULT '',
+    pipeline_id  TEXT,
+    acknowledged INTEGER NOT NULL DEFAULT 0,
+    created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_signals_ack ON agent_signals(acknowledged);
 "#;
 
 // ============================================================================
@@ -1653,6 +1664,83 @@ pub fn msg_get(pane_id: &str, mark_read: bool) -> Value {
         }
     }
     json!({"messages": unread})
+}
+
+// ============================================================================
+// AGENT SIGNALS
+// ============================================================================
+
+/// Send a signal from an agent to the control pane (TUI).
+pub fn signal_send(pane_id: &str, signal_type: &str, message: &str, pipeline_id: Option<&str>) -> Value {
+    let conn = match coordination_db() { Ok(c) => c, Err(e) => return json!({"error": e}) };
+    let ts = crate::state::now();
+    match conn.execute(
+        "INSERT INTO agent_signals (pane_id, signal_type, message, pipeline_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![pane_id, signal_type, message, pipeline_id, ts],
+    ) {
+        Ok(_) => json!({"status": "signal_sent", "signal_type": signal_type, "pane_id": pane_id}),
+        Err(e) => json!({"error": format!("Signal insert: {}", e)}),
+    }
+}
+
+/// List signals, optionally filtering by acknowledged status.
+pub fn signal_list(unack_only: bool) -> Value {
+    let conn = match coordination_db() { Ok(c) => c, Err(e) => return json!({"error": e}) };
+    let sql = if unack_only {
+        "SELECT id, pane_id, signal_type, message, pipeline_id, created_at FROM agent_signals WHERE acknowledged = 0 ORDER BY id DESC LIMIT 50"
+    } else {
+        "SELECT id, pane_id, signal_type, message, pipeline_id, created_at FROM agent_signals ORDER BY id DESC LIMIT 50"
+    };
+    let mut stmt = match conn.prepare(sql) { Ok(s) => s, Err(e) => return json!({"error": format!("{}", e)}) };
+    let mut signals = vec![];
+    if let Ok(rows) = stmt.query_map([], |r| {
+        Ok(json!({
+            "id": r.get::<_, i64>(0)?,
+            "pane_id": r.get::<_, String>(1)?,
+            "signal_type": r.get::<_, String>(2)?,
+            "message": r.get::<_, String>(3)?,
+            "pipeline_id": r.get::<_, Option<String>>(4)?,
+            "created_at": r.get::<_, String>(5)?,
+        }))
+    }) {
+        for row in rows.flatten() { signals.push(row); }
+    }
+    json!({"signals": signals, "count": signals.len()})
+}
+
+/// Acknowledge a signal (mark as read).
+pub fn signal_acknowledge(signal_id: i64) -> Value {
+    let conn = match coordination_db() { Ok(c) => c, Err(e) => return json!({"error": e}) };
+    match conn.execute("UPDATE agent_signals SET acknowledged = 1 WHERE id = ?1", params![signal_id]) {
+        Ok(n) => json!({"status": "acknowledged", "id": signal_id, "updated": n}),
+        Err(e) => json!({"error": format!("{}", e)}),
+    }
+}
+
+/// Count unacknowledged signals.
+pub fn signal_count_unack() -> usize {
+    let conn = match coordination_db() { Ok(c) => c, Err(_) => return 0 };
+    conn.query_row("SELECT COUNT(*) FROM agent_signals WHERE acknowledged = 0", [], |r| r.get::<_, usize>(0)).unwrap_or(0)
+}
+
+/// Get unacknowledged signals grouped by pane.
+pub fn signal_by_pane() -> std::collections::HashMap<u8, Vec<(String, String)>> {
+    let mut map = std::collections::HashMap::new();
+    let conn = match coordination_db() { Ok(c) => c, Err(_) => return map };
+    let mut stmt = match conn.prepare(
+        "SELECT pane_id, signal_type, message FROM agent_signals WHERE acknowledged = 0 ORDER BY id DESC"
+    ) { Ok(s) => s, Err(_) => return map };
+    if let Ok(rows) = stmt.query_map([], |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+    }) {
+        for row in rows.flatten() {
+            let (pane_str, sig_type, msg) = row;
+            if let Ok(pane_num) = pane_str.parse::<u8>() {
+                map.entry(pane_num).or_insert_with(Vec::new).push((sig_type, msg));
+            }
+        }
+    }
+    map
 }
 
 // ============================================================================

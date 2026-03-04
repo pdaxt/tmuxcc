@@ -236,6 +236,49 @@ pub fn factory_events(req: &FactoryStatusRequest) -> String {
     }).to_string()
 }
 
+/// Pause a pipeline — blocked/pending stages won't spawn until resumed.
+pub fn factory_pause(req: &FactoryStatusRequest) -> String {
+    let pid = match &req.pipeline_id {
+        Some(pid) => pid,
+        None => return json_err("pipeline_id required to pause"),
+    };
+    match factory::pause_pipeline(pid) {
+        Ok(()) => serde_json::json!({
+            "status": "paused",
+            "pipeline_id": pid,
+        }).to_string(),
+        Err(e) => json_err(&format!("Pause failed: {}", e)),
+    }
+}
+
+/// Resume a paused pipeline.
+pub fn factory_resume(req: &FactoryStatusRequest) -> String {
+    let pid = match &req.pipeline_id {
+        Some(pid) => pid,
+        None => return json_err("pipeline_id required to resume"),
+    };
+    match factory::resume_pipeline(pid) {
+        Ok(()) => serde_json::json!({
+            "status": "resumed",
+            "pipeline_id": pid,
+        }).to_string(),
+        Err(e) => json_err(&format!("Resume failed: {}", e)),
+    }
+}
+
+/// Retry a specific stage by name within a pipeline.
+pub fn factory_retry_stage(req: &FactoryRetryStageRequest) -> String {
+    match factory::retry_stage(&req.pipeline_id, &req.stage) {
+        Ok(msg) => serde_json::json!({
+            "status": "retried",
+            "pipeline_id": req.pipeline_id,
+            "stage": req.stage,
+            "message": msg,
+        }).to_string(),
+        Err(e) => json_err(&format!("Retry stage failed: {}", e)),
+    }
+}
+
 /// Scan for conflicts in a pipeline's project.
 pub fn conflict_scan(req: &FactoryStatusRequest) -> String {
     match &req.pipeline_id {

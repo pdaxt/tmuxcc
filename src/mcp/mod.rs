@@ -396,6 +396,33 @@ impl AgentOSService {
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
+    #[tool(description = "Pause a factory pipeline. Stops new stages from spawning. Running agents continue but no new ones start. Use :resume to unpause.")]
+    async fn factory_pause(
+        &self,
+        Parameters(req): Parameters<FactoryStatusRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = tools::factory_tools::factory_pause(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
+    }
+
+    #[tool(description = "Resume a paused factory pipeline. Queued stages will spawn on next auto-cycle.")]
+    async fn factory_resume(
+        &self,
+        Parameters(req): Parameters<FactoryStatusRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = tools::factory_tools::factory_resume(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
+    }
+
+    #[tool(description = "Retry a specific stage in a pipeline by name (e.g., 'dev', 'qa'). Resets that stage and all cascade-failed dependents back to pending.")]
+    async fn factory_retry_stage(
+        &self,
+        Parameters(req): Parameters<FactoryRetryStageRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = tools::factory_tools::factory_retry_stage(&req);
+        Ok(CallToolResult::success(vec![Content::text(result)]))
+    }
+
     // === MULTI-AGENT COORDINATION (37 tools) ===
 
     #[tool(description = "Allocate a port for a service. Finds free port in 3001-3099 range, checks for conflicts.")]
@@ -638,12 +665,18 @@ impl AgentOSService {
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
-    #[tool(description = "Send a direct message to a specific agent.")]
+    #[tool(description = "Send a direct message to a specific agent. Message is pushed to their PTY in real-time.")]
     async fn msg_send(
         &self,
         Parameters(req): Parameters<MsgSendRequest>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let result = tools::multi_agent_tools::msg_send(&req.from_pane, &req.to_pane, &req.message);
+        // Push to target agent's PTY for real-time delivery
+        if let Ok(pane_num) = req.to_pane.parse::<u8>() {
+            let formatted = format!("[MSG from {}]: {}", req.from_pane, req.message);
+            let mut pty = self.app.pty_lock();
+            let _ = pty.send_line(pane_num, &formatted);
+        }
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
@@ -654,6 +687,30 @@ impl AgentOSService {
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         let result = tools::multi_agent_tools::msg_get(&req.pane_id, req.mark_read.unwrap_or(true));
         Ok(CallToolResult::success(vec![Content::text(result)]))
+    }
+
+    #[tool(description = "Signal the control pane that you need attention. Types: need_help, blocked, found_issue, completed, failed. Appears as alert badge in TUI.")]
+    async fn os_signal(
+        &self,
+        Parameters(req): Parameters<SignalRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::signal_send(&req.pane_id, &req.signal_type, &req.message, req.pipeline_id.as_deref());
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "List agent signals (alerts). Shows unacknowledged by default.")]
+    async fn os_signal_list(&self) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::signal_list(true);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
+    }
+
+    #[tool(description = "Acknowledge (dismiss) a signal by ID.")]
+    async fn os_signal_ack(
+        &self,
+        Parameters(req): Parameters<SignalAckRequest>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = crate::multi_agent::signal_acknowledge(req.signal_id);
+        Ok(CallToolResult::success(vec![Content::text(result.to_string())]))
     }
 
     #[tool(description = "Clean up stale entries: ports, agents, locks, branches, builds from inactive panes.")]

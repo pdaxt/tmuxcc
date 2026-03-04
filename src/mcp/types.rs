@@ -1708,6 +1708,34 @@ pub struct FactoryStatusRequest {
     pub pipeline_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct FactoryRetryStageRequest {
+    #[schemars(description = "Pipeline ID")]
+    pub pipeline_id: String,
+    #[schemars(description = "Stage name to retry (e.g., 'dev', 'qa', 'security')")]
+    pub stage: String,
+}
+
+// === SIGNAL TYPES ===
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SignalRequest {
+    #[schemars(description = "Your pane ID (e.g. '3' or 'claude6:3.0')")]
+    pub pane_id: String,
+    #[schemars(description = "Signal type: need_help, blocked, found_issue, completed, failed")]
+    pub signal_type: String,
+    #[schemars(description = "Details about what you need or found")]
+    pub message: String,
+    #[schemars(description = "Pipeline ID if this relates to a factory pipeline")]
+    pub pipeline_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SignalAckRequest {
+    #[schemars(description = "Signal ID to acknowledge")]
+    pub signal_id: i64,
+}
+
 // === GATEWAY TYPES ===
 
 #[derive(Debug, Deserialize, JsonSchema)]

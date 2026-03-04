@@ -285,24 +285,46 @@ pub async fn auto_cycle(app: &App) -> String {
                             match crate::factory::run_gate(pid) {
                                 Ok(gate) => {
                                     if !gate.passed {
-                                        // Gate failed — block dependent tasks so QA/security don't run on broken code
-                                        let q = queue::load_queue();
-                                        let dep_ids: Vec<String> = q.tasks.iter()
-                                            .filter(|t| t.pipeline_id.as_deref() == Some(pid.as_str())
-                                                && t.depends_on.contains(&qt.id)
-                                                && (t.status == queue::QueueStatus::Pending || t.status == queue::QueueStatus::Blocked))
-                                            .map(|t| t.id.clone())
-                                            .collect();
-                                        for dep_id in &dep_ids {
-                                            let _ = queue::mark_failed(dep_id, &format!("Quality gate failed for pipeline {}", pid));
+                                        // Gate failed — try auto-retry if retries remain
+                                        if qt.retry_count < qt.max_retries {
+                                            // Circuit breaker: reset dev task to pending for re-run
+                                            // First mark as failed (so retry_stage can reset it)
+                                            let _ = queue::mark_failed(&qt.id, "Quality gate failed");
+                                            let retried = crate::factory::retry_stage(pid, "dev").is_ok();
+                                            crate::factory::log_pipeline_event(pid, "gate_retry",
+                                                &format!("Auto-retrying dev (attempt {}/{})", qt.retry_count + 1, qt.max_retries));
+                                            actions.push(serde_json::json!({
+                                                "action": "quality_gate_retry",
+                                                "pipeline_id": pid,
+                                                "retry_count": qt.retry_count + 1,
+                                                "max_retries": qt.max_retries,
+                                                "retried": retried,
+                                                "build": gate.build.as_ref().map(|c| c.success),
+                                                "test": gate.test.as_ref().map(|c| c.success),
+                                            }));
+                                        } else {
+                                            // Max retries exhausted — fail dependents
+                                            let q = queue::load_queue();
+                                            let dep_ids: Vec<String> = q.tasks.iter()
+                                                .filter(|t| t.pipeline_id.as_deref() == Some(pid.as_str())
+                                                    && t.depends_on.contains(&qt.id)
+                                                    && (t.status == queue::QueueStatus::Pending || t.status == queue::QueueStatus::Blocked))
+                                                .map(|t| t.id.clone())
+                                                .collect();
+                                            for dep_id in &dep_ids {
+                                                let _ = queue::mark_failed(dep_id, &format!("Quality gate failed after {} retries", qt.max_retries));
+                                            }
+                                            crate::factory::log_pipeline_event(pid, "gate_failed",
+                                                &format!("Gate failed after {} retries, blocking {} dependents", qt.max_retries, dep_ids.len()));
+                                            actions.push(serde_json::json!({
+                                                "action": "quality_gate_block",
+                                                "pipeline_id": pid,
+                                                "blocked_tasks": dep_ids.len(),
+                                                "retries_exhausted": true,
+                                                "build": gate.build.as_ref().map(|c| c.success),
+                                                "test": gate.test.as_ref().map(|c| c.success),
+                                            }));
                                         }
-                                        actions.push(serde_json::json!({
-                                            "action": "quality_gate_block",
-                                            "pipeline_id": pid,
-                                            "blocked_tasks": dep_ids.len(),
-                                            "build": gate.build.as_ref().map(|c| c.success),
-                                            "test": gate.test.as_ref().map(|c| c.success),
-                                        }));
                                     } else {
                                         actions.push(serde_json::json!({
                                             "action": "quality_gate",
@@ -453,15 +475,26 @@ pub async fn auto_cycle(app: &App) -> String {
                         if qt.role == "developer" {
                             if let Ok(gate) = crate::factory::run_gate(pid) {
                                 if !gate.passed {
-                                    let q2 = queue::load_queue();
-                                    let dep_ids: Vec<String> = q2.tasks.iter()
-                                        .filter(|t| t.pipeline_id.as_deref() == Some(pid.as_str())
-                                            && t.depends_on.contains(&task_id)
-                                            && (t.status == queue::QueueStatus::Pending || t.status == queue::QueueStatus::Blocked))
-                                        .map(|t| t.id.clone())
-                                        .collect();
-                                    for dep_id in &dep_ids {
-                                        let _ = queue::mark_failed(dep_id, &format!("Quality gate failed for pipeline {}", pid));
+                                    if qt.retry_count < qt.max_retries {
+                                        // Circuit breaker: mark failed then retry stage
+                                        let _ = queue::mark_failed(&task_id, "Quality gate failed");
+                                        let _ = crate::factory::retry_stage(pid, "dev");
+                                        crate::factory::log_pipeline_event(pid, "gate_retry",
+                                            &format!("Auto-retrying dev via tmux (attempt {}/{})", qt.retry_count + 1, qt.max_retries));
+                                    } else {
+                                        // Max retries exhausted — fail dependents
+                                        let q2 = queue::load_queue();
+                                        let dep_ids: Vec<String> = q2.tasks.iter()
+                                            .filter(|t| t.pipeline_id.as_deref() == Some(pid.as_str())
+                                                && t.depends_on.contains(&task_id)
+                                                && (t.status == queue::QueueStatus::Pending || t.status == queue::QueueStatus::Blocked))
+                                            .map(|t| t.id.clone())
+                                            .collect();
+                                        for dep_id in &dep_ids {
+                                            let _ = queue::mark_failed(dep_id, &format!("Quality gate failed after {} retries", qt.max_retries));
+                                        }
+                                        crate::factory::log_pipeline_event(pid, "gate_failed",
+                                            &format!("Gate failed after {} retries, blocking {} dependents", qt.max_retries, dep_ids.len()));
                                     }
                                 }
                             }
@@ -496,6 +529,13 @@ pub async fn auto_cycle(app: &App) -> String {
                 Some(t) => t,
                 None => break,
             };
+
+            // Skip tasks from paused pipelines
+            if let Some(ref pid) = task.pipeline_id {
+                if crate::factory::is_pipeline_paused(pid) {
+                    continue;
+                }
+            }
 
             // Build enriched prompt with predecessor results
             let mut prompt = task.prompt.clone();

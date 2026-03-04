@@ -31,6 +31,9 @@ pub fn render_overlay(f: &mut Frame, area: Rect, mode: &TuiMode, _data: &Dashboa
         TuiMode::Result { message, is_error, .. } => {
             render_result(f, area, message, *is_error);
         }
+        TuiMode::Talk { target_pane, input: input_str, cursor } => {
+            render_talk(f, area, *target_pane, input_str, *cursor);
+        }
     }
 }
 
@@ -201,6 +204,36 @@ fn render_autocomplete(f: &mut Frame, area: Rect, completions: &[(String, String
         ])
     }).collect();
     f.render_widget(Paragraph::new(lines), inner);
+}
+
+/// Talk overlay — message input bar at bottom with pane indicator
+fn render_talk(f: &mut Frame, area: Rect, pane: u8, input_str: &str, cursor: usize) {
+    let bar = Rect::new(area.x, area.y + area.height - 1, area.width, 1);
+    f.render_widget(Clear, bar);
+
+    let prefix = format!("Talk P{}> ", pane);
+    let prefix_len = prefix.len();
+    let cursor_pos = prefix_len + cursor;
+
+    let full_display = format!("{}{}", prefix, input_str);
+    let before_cursor = &full_display[..cursor_pos.min(full_display.len())];
+    let at_cursor = if cursor_pos < full_display.len() {
+        &full_display[cursor_pos..cursor_pos + 1]
+    } else {
+        " "
+    };
+    let after_cursor = if cursor_pos + 1 < full_display.len() {
+        &full_display[cursor_pos + 1..]
+    } else {
+        ""
+    };
+
+    let paragraph = Paragraph::new(Line::from(vec![
+        Span::styled(before_cursor, Style::default().fg(Color::Cyan)),
+        Span::styled(at_cursor, Style::default().fg(Color::Black).bg(Color::White)),
+        Span::styled(after_cursor, Style::default().fg(Color::Cyan)),
+    ]));
+    f.render_widget(paragraph, bar);
 }
 
 /// Create a centered rectangle

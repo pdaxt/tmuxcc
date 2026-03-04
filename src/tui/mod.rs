@@ -48,6 +48,7 @@ pub enum TuiMode {
     Confirm { action: PendingAction, message: String },
     Executing { description: String, _started: Instant },
     Result { message: String, is_error: bool, shown_at: Instant },
+    Talk { target_pane: u8, input: String, cursor: usize },
 }
 
 #[derive(Clone)]
@@ -108,6 +109,10 @@ pub enum TuiCommand {
         project: Option<String>,
         request: String,
         template: Option<String>,
+    },
+    Talk {
+        pane: u8,
+        message: String,
     },
 }
 
@@ -296,6 +301,27 @@ async fn execute_command(app: &App, cmd: TuiCommand) -> TuiResult {
             let success = !result.contains("\"error\"");
             TuiResult { description: desc, success, message: result }
         }
+        TuiCommand::Talk { pane, message } => {
+            let desc = format!("Talk P{}", pane);
+            let send_result = {
+                let mut pty = app.pty_lock();
+                pty.send_line(pane, &message)
+            };
+            // Also log to multi_agent messages for audit trail
+            let _ = crate::multi_agent::msg_send("tui", &pane.to_string(), &message);
+            match send_result {
+                Ok(()) => TuiResult {
+                    description: desc,
+                    success: true,
+                    message: format!("Sent to pane {}: {}", pane, &message.chars().take(50).collect::<String>()),
+                },
+                Err(e) => TuiResult {
+                    description: desc,
+                    success: false,
+                    message: format!("Failed to send to pane {}: {}", pane, e),
+                },
+            }
+        }
     }
 }
 
@@ -415,6 +441,8 @@ fn run_loop(
                     handle_input(key, &mut mode, cmd_tx);
                 } else if matches!(mode, TuiMode::Confirm { .. }) {
                     handle_confirm(key, &mut mode, cmd_tx);
+                } else if matches!(mode, TuiMode::Talk { .. }) {
+                    handle_talk(key, &mut mode, cmd_tx);
                 } else if matches!(mode, TuiMode::Executing { .. }) {
                     if key.code == KeyCode::Esc {
                         mode = TuiMode::Navigate;
@@ -456,9 +484,9 @@ fn handle_navigate(
             *mode = TuiMode::Input { form: input::create_spawn_form(*selected) };
         }
 
-        // Queue add form
+        // Talk to agent on selected pane
         KeyCode::Char('t') => {
-            *mode = TuiMode::Input { form: input::create_queue_form() };
+            *mode = TuiMode::Talk { target_pane: *selected, input: String::new(), cursor: 0 };
         }
 
         // Factory form
@@ -739,6 +767,50 @@ fn handle_confirm(
         }
         KeyCode::Char('n') | KeyCode::Esc => {
             *mode = TuiMode::Navigate;
+        }
+        _ => {}
+    }
+}
+
+fn handle_talk(
+    key: crossterm::event::KeyEvent,
+    mode: &mut TuiMode,
+    cmd_tx: &mpsc::Sender<TuiCommand>,
+) {
+    let (target_pane, input_str, cursor) = match mode {
+        TuiMode::Talk { target_pane, input, cursor } => (*target_pane, input, cursor),
+        _ => return,
+    };
+
+    match key.code {
+        KeyCode::Esc => {
+            *mode = TuiMode::Navigate;
+        }
+        KeyCode::Enter => {
+            let msg = input_str.trim().to_string();
+            if !msg.is_empty() {
+                let _ = cmd_tx.send(TuiCommand::Talk { pane: target_pane, message: msg });
+                *mode = TuiMode::Executing {
+                    description: format!("Talking to P{}...", target_pane),
+                    _started: Instant::now(),
+                };
+            } else {
+                *mode = TuiMode::Navigate;
+            }
+        }
+        KeyCode::Backspace => {
+            if *cursor > 0 {
+                input_str.remove(*cursor - 1);
+                *cursor -= 1;
+            }
+        }
+        KeyCode::Left => { if *cursor > 0 { *cursor -= 1; } }
+        KeyCode::Right => { if *cursor < input_str.len() { *cursor += 1; } }
+        KeyCode::Home => { *cursor = 0; }
+        KeyCode::End => { *cursor = input_str.len(); }
+        KeyCode::Char(c) => {
+            input_str.insert(*cursor, c);
+            *cursor += 1;
         }
         _ => {}
     }

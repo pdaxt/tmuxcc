@@ -826,6 +826,89 @@ pub fn conflict_scan(pipeline_id: &str) -> serde_json::Value {
 }
 
 // ============================================================
+// Pipeline Pause/Resume
+// ============================================================
+
+fn paused_file() -> std::path::PathBuf {
+    crate::config::agentos_root().join("paused_pipelines.json")
+}
+
+fn load_paused() -> HashSet<String> {
+    std::fs::read_to_string(paused_file())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_paused(set: &HashSet<String>) -> Result<()> {
+    let data = serde_json::to_string(set)?;
+    std::fs::write(paused_file(), data)?;
+    Ok(())
+}
+
+/// Pause a pipeline — auto_cycle will skip its tasks.
+pub fn pause_pipeline(pipeline_id: &str) -> Result<()> {
+    let mut paused = load_paused();
+    paused.insert(pipeline_id.to_string());
+    save_paused(&paused)
+}
+
+/// Resume a paused pipeline.
+pub fn resume_pipeline(pipeline_id: &str) -> Result<()> {
+    let mut paused = load_paused();
+    paused.remove(pipeline_id);
+    save_paused(&paused)
+}
+
+/// Check if a pipeline is paused.
+pub fn is_pipeline_paused(pipeline_id: &str) -> bool {
+    load_paused().contains(pipeline_id)
+}
+
+/// Retry a specific stage in a pipeline by name (e.g., "dev", "qa").
+pub fn retry_stage(pipeline_id: &str, stage_name: &str) -> Result<String> {
+    let mut q = queue::load_queue();
+
+    // Find the task matching this pipeline + stage
+    let task_id = q.tasks.iter()
+        .find(|t| {
+            t.pipeline_id.as_deref() == Some(pipeline_id) &&
+            t.task.starts_with(&format!("[{}]", stage_name))
+        })
+        .map(|t| t.id.clone())
+        .ok_or_else(|| anyhow::anyhow!("Stage '{}' not found in pipeline '{}'", stage_name, pipeline_id))?;
+
+    // Reset this task and all cascade-failed dependents
+    let mut reset_ids = vec![task_id.clone()];
+    loop {
+        let new_ids: Vec<String> = q.tasks.iter()
+            .filter(|t| {
+                t.status == queue::QueueStatus::Failed &&
+                t.depends_on.iter().any(|d| reset_ids.contains(d)) &&
+                !reset_ids.contains(&t.id)
+            })
+            .map(|t| t.id.clone())
+            .collect();
+        if new_ids.is_empty() { break; }
+        reset_ids.extend(new_ids);
+    }
+
+    for t in q.tasks.iter_mut() {
+        if reset_ids.contains(&t.id) {
+            t.status = queue::QueueStatus::Pending;
+            t.last_error = None;
+            t.result = None;
+            t.started_at = None;
+            t.completed_at = None;
+            t.pane = None;
+        }
+    }
+    queue::save_queue(&q)?;
+
+    Ok(format!("Reset {} tasks (stage '{}' + dependents)", reset_ids.len(), stage_name))
+}
+
+// ============================================================
 // Tests
 // ============================================================
 

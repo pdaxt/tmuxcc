@@ -245,6 +245,50 @@ pub fn parse_command(input: &str) -> Option<TuiCommand> {
 
     // Built-in commands (full names + shorthands)
     match cmd_lower.as_deref() {
+        Some("talk" | "msg" | "tell") if parts.len() >= 3 => {
+            if let Ok(pane) = parts[1].parse::<u8>() {
+                return Some(TuiCommand::Talk {
+                    pane,
+                    message: parts[2].to_string(),
+                });
+            }
+        }
+        // :pause pipe_xxx — pause a pipeline
+        Some("pause") if parts.len() >= 2 => {
+            return Some(TuiCommand::McpDispatch {
+                tool: "factory_pause".into(),
+                args: serde_json::json!({ "pipeline_id": parts[1] }),
+            });
+        }
+        // :resume pipe_xxx — resume a paused pipeline
+        Some("resume") if parts.len() >= 2 => {
+            return Some(TuiCommand::McpDispatch {
+                tool: "factory_resume".into(),
+                args: serde_json::json!({ "pipeline_id": parts[1] }),
+            });
+        }
+        // :retry pipe_xxx [stage] — retry failed stages or a specific stage
+        Some("retry") if parts.len() >= 2 => {
+            if parts.len() >= 3 {
+                // :retry pipe_xxx dev — retry specific stage
+                return Some(TuiCommand::McpDispatch {
+                    tool: "factory_retry_stage".into(),
+                    args: serde_json::json!({ "pipeline_id": parts[1], "stage": parts[2] }),
+                });
+            }
+            // :retry pipe_xxx — retry all failed
+            return Some(TuiCommand::McpDispatch {
+                tool: "factory_retry".into(),
+                args: serde_json::json!({ "pipeline_id": parts[1] }),
+            });
+        }
+        // :abort pipe_xxx — cancel/abort a pipeline
+        Some("abort" | "cancel") if parts.len() >= 2 => {
+            return Some(TuiCommand::McpDispatch {
+                tool: "factory_cancel".into(),
+                args: serde_json::json!({ "pipeline_id": parts[1] }),
+            });
+        }
         Some("spawn" | "s") if parts.len() >= 3 => {
             return Some(TuiCommand::Spawn {
                 pane: parts[1].to_string(),

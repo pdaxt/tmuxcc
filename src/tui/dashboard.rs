@@ -152,8 +152,11 @@ pub struct PipelineSnapshot {
     pub description: String,
     pub template: String,
     pub status: String,
+    #[allow(dead_code)]
+    pub paused: bool,
     pub stages: Vec<PipelineStageSnapshot>,
     pub gate_passed: Option<bool>,
+    pub signal_count: usize,
 }
 
 #[allow(dead_code)]
@@ -162,6 +165,7 @@ pub struct PipelineStageSnapshot {
     pub role: String,
     pub status: String,
     pub pane: Option<u8>,
+    pub pty_snippet: Option<String>,
 }
 
 /// Full dashboard snapshot
@@ -197,6 +201,8 @@ pub struct DashboardData {
     pub audit: AuditSnapshot,
     pub action_log: Vec<ActionLogEntry>,
     pub pipelines: Vec<PipelineSnapshot>,
+    pub signal_count: usize,
+    pub pane_signals: std::collections::HashMap<u8, Vec<(String, String)>>,
 }
 
 /// Collect all data in one pass (lock once, release)
@@ -363,7 +369,7 @@ pub fn collect_data(app: &App, selected: u8, view_mode: ViewMode, feature_cursor
 
     // Pipeline data
     let pipelines = if view_mode == ViewMode::Pipeline {
-        collect_pipelines()
+        collect_pipelines(app)
     } else {
         Vec::new()
     };
@@ -411,6 +417,8 @@ pub fn collect_data(app: &App, selected: u8, view_mode: ViewMode, feature_cursor
         audit: audit_data,
         action_log: Vec::new(),
         pipelines,
+        signal_count: crate::multi_agent::signal_count_unack(),
+        pane_signals: crate::multi_agent::signal_by_pane(),
     }
 }
 
@@ -822,23 +830,41 @@ fn collect_audit() -> AuditSnapshot {
     AuditSnapshot { projects, total_critical, total_high, worst_grade }
 }
 
-fn collect_pipelines() -> Vec<PipelineSnapshot> {
+fn collect_pipelines(app: &App) -> Vec<PipelineSnapshot> {
     use crate::factory;
+    let pty = app.pty_lock();
+    let pane_sigs = crate::multi_agent::signal_by_pane();
     factory::list_pipelines().into_iter().map(|p| {
         let gate_passed = factory::get_gate_result(&p.id).map(|g| g.passed);
+        let paused = factory::is_pipeline_paused(&p.id);
+        // Count signals for panes in this pipeline
+        let sig_count: usize = p.stages.iter()
+            .filter_map(|s| s.pane)
+            .map(|pn| pane_sigs.get(&pn).map_or(0, |v| v.len()))
+            .sum();
         PipelineSnapshot {
             id: p.id,
             project: p.project,
             description: p.description,
             template: p.template,
-            status: p.status,
-            stages: p.stages.into_iter().map(|s| PipelineStageSnapshot {
-                name: s.name,
-                role: s.role,
-                status: s.status,
-                pane: s.pane,
+            status: if paused { "paused".into() } else { p.status },
+            paused,
+            stages: p.stages.into_iter().map(|s| {
+                let snippet = if s.status == "running" {
+                    s.pane.and_then(|pn| pty.last_output(pn, 2))
+                } else {
+                    None
+                };
+                PipelineStageSnapshot {
+                    name: s.name,
+                    role: s.role,
+                    status: s.status,
+                    pane: s.pane,
+                    pty_snippet: snippet,
+                }
             }).collect(),
             gate_passed,
+            signal_count: sig_count,
         }
     }).collect()
 }
@@ -1205,6 +1231,11 @@ fn render_header(f: &mut Frame, area: Rect, data: &DashboardData) {
         } else {
             Span::raw("")
         },
+        if data.signal_count > 0 {
+            Span::styled(format!(" [!{}]", data.signal_count), Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+        } else {
+            Span::raw("")
+        },
         if !data.audit.projects.is_empty() {
             let gc = match data.audit.worst_grade.as_str() {
                 "A" => Color::Green, "B" => Color::Cyan, "C" => Color::Yellow,
@@ -1256,11 +1287,29 @@ fn render_pane_table(f: &mut Frame, area: Rect, data: &DashboardData) {
     ];
 
     for ps in &data.panes {
-        lines.push(widgets::pane_line(
+        let mut line = widgets::pane_line(
             ps.pane, &ps.theme_fg, &ps.theme, &ps.project, &ps.role,
             &ps.task, &ps.status, ps.branch.as_deref(), ps.pty_running,
             ps.pane == data.selected, &ps.health, &ps.runtime,
-        ));
+        );
+        // Append signal badge if this pane has unack'd signals
+        if let Some(signals) = data.pane_signals.get(&ps.pane) {
+            if let Some((sig_type, _msg)) = signals.first() {
+                let (icon, color) = match sig_type.as_str() {
+                    "need_help" | "failed" => ("!", Color::Red),
+                    "blocked" => ("~", Color::Yellow),
+                    "found_issue" => ("?", Color::Magenta),
+                    _ => ("*", Color::Cyan),
+                };
+                let badge = if signals.len() > 1 {
+                    format!(" [{}{}]", icon, signals.len())
+                } else {
+                    format!(" [{}]", icon)
+                };
+                line.spans.push(Span::styled(badge, Style::default().fg(color).add_modifier(Modifier::BOLD)));
+            }
+        }
+        lines.push(line);
     }
 
     let block = Block::default()
@@ -2134,7 +2183,7 @@ fn render_help_bar(f: &mut Frame, area: Rect, data: &DashboardData) {
             Span::styled(" [s]", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
             Span::styled("pawn ", Style::default().fg(Color::DarkGray)),
             Span::styled("[t]", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::styled("ask ", Style::default().fg(Color::DarkGray)),
+            Span::styled("alk ", Style::default().fg(Color::DarkGray)),
             Span::styled("[a]", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
             Span::styled("uto ", Style::default().fg(Color::DarkGray)),
             Span::styled("[k]", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
@@ -2232,35 +2281,43 @@ fn render_pipeline_view(f: &mut Frame, area: Rect, data: &DashboardData) {
     f.render_widget(block, area);
 
     if data.pipelines.is_empty() {
-        let empty = Paragraph::new("  No pipelines. Use :factory <request> or factory_run MCP tool to start one.")
+        let empty = Paragraph::new("  No pipelines. Use :go <project> <request> to start one.")
             .style(Style::default().fg(Color::DarkGray));
         f.render_widget(empty, inner);
         return;
     }
 
+    // Reserve last line for controls hint
+    let content_area = Rect::new(inner.x, inner.y, inner.width, inner.height.saturating_sub(1));
+    let hint_area = Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1);
+
     let mut lines: Vec<Line> = Vec::new();
     for pipe in &data.pipelines {
+        // Header line: id  project  [template]  STATUS  [!N signals]  [PAUSED]
         let status_color = match pipe.status.as_str() {
             "running" => Color::Green,
             "done" => Color::DarkGray,
             "failed" => Color::Red,
+            "paused" => Color::Yellow,
             _ => Color::Yellow,
         };
-        lines.push(Line::from(vec![
+        let mut header_spans = vec![
             Span::styled(&pipe.id, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
             Span::raw("  "),
             Span::styled(&pipe.project, Style::default().fg(Color::White)),
             Span::raw("  "),
-            Span::styled(
-                format!("[{}]", pipe.template),
-                Style::default().fg(Color::Magenta),
-            ),
+            Span::styled(format!("[{}]", pipe.template), Style::default().fg(Color::Magenta)),
             Span::raw("  "),
-            Span::styled(
-                pipe.status.to_uppercase(),
-                Style::default().fg(status_color).add_modifier(Modifier::BOLD),
-            ),
-        ]));
+            Span::styled(pipe.status.to_uppercase(), Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+        ];
+        if pipe.signal_count > 0 {
+            header_spans.push(Span::raw("  "));
+            header_spans.push(Span::styled(
+                format!("[!{}]", pipe.signal_count),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ));
+        }
+        lines.push(Line::from(header_spans));
 
         // Stage flow
         let mut stage_spans: Vec<Span> = vec![Span::raw("  ")];
@@ -2272,21 +2329,30 @@ fn render_pipeline_view(f: &mut Frame, area: Rect, data: &DashboardData) {
                 "done" => ("+", Color::Green),
                 "running" => ("*", Color::Cyan),
                 "failed" => ("x", Color::Red),
+                "blocked" => (".", Color::DarkGray),
                 _ => (".", Color::DarkGray),
             };
             stage_spans.push(Span::styled(icon, Style::default().fg(color)));
-            stage_spans.push(Span::styled(
-                &stage.name,
-                Style::default().fg(color),
-            ));
+            stage_spans.push(Span::styled(&stage.name, Style::default().fg(color)));
             if let Some(pane) = stage.pane {
-                stage_spans.push(Span::styled(
-                    format!("({})", pane),
-                    Style::default().fg(Color::DarkGray),
-                ));
+                stage_spans.push(Span::styled(format!("(P{})", pane), Style::default().fg(Color::DarkGray)));
             }
         }
         lines.push(Line::from(stage_spans));
+
+        // Live PTY output for running stages
+        for stage in &pipe.stages {
+            if let Some(ref snippet) = stage.pty_snippet {
+                for line in snippet.lines().take(2) {
+                    let trimmed = if line.len() > 78 { &line[..78] } else { line };
+                    lines.push(Line::from(vec![
+                        Span::raw("    "),
+                        Span::styled(format!("{}| ", stage.name), Style::default().fg(Color::DarkGray)),
+                        Span::styled(trimmed, Style::default().fg(Color::White)),
+                    ]));
+                }
+            }
+        }
 
         // Gate status
         if let Some(passed) = pipe.gate_passed {
@@ -2295,12 +2361,11 @@ fn render_pipeline_view(f: &mut Frame, area: Rect, data: &DashboardData) {
             } else {
                 ("FAIL", Color::Red, "build or test failed")
             };
-            stage_spans = vec![
+            lines.push(Line::from(vec![
                 Span::raw("  Gate: "),
                 Span::styled(gate_icon, Style::default().fg(gate_color).add_modifier(Modifier::BOLD)),
                 Span::styled(format!(" ({})", gate_text), Style::default().fg(Color::DarkGray)),
-            ];
-            lines.push(Line::from(stage_spans));
+            ]));
         }
 
         // Description
@@ -2314,6 +2379,17 @@ fn render_pipeline_view(f: &mut Frame, area: Rect, data: &DashboardData) {
     }
 
     let paragraph = Paragraph::new(lines).scroll((0, 0));
-    f.render_widget(paragraph, inner);
+    f.render_widget(paragraph, content_area);
+
+    // Controls hint bar
+    let hint = Line::from(vec![
+        Span::styled(" :pause ", Style::default().fg(Color::Yellow)),
+        Span::styled(":resume ", Style::default().fg(Color::Green)),
+        Span::styled(":retry ", Style::default().fg(Color::Cyan)),
+        Span::styled(":abort ", Style::default().fg(Color::Red)),
+        Span::styled(":talk N msg ", Style::default().fg(Color::Magenta)),
+        Span::styled(":go proj desc ", Style::default().fg(Color::White)),
+    ]);
+    f.render_widget(Paragraph::new(hint), hint_area);
 }
 

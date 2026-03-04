@@ -182,15 +182,44 @@ pub async fn dispatch_mcp_tool(app: &App, tool: &str, args: Value) -> String {
         // === MULTI-AGENT: MESSAGING ===
         "msg_broadcast" => {
             let r = deser!(args, MsgBroadcastRequest);
-            crate::multi_agent::msg_broadcast(&r.from_pane, &r.message, &r.priority.unwrap_or_else(|| "info".into())).to_string()
+            let result = crate::multi_agent::msg_broadcast(&r.from_pane, &r.message, &r.priority.unwrap_or_else(|| "info".into()));
+            // Push to all active panes for real-time delivery
+            let formatted = format!("[BROADCAST from {}]: {}", r.from_pane, r.message);
+            {
+                let mut pty = app.pty_lock();
+                for i in 1..=crate::config::pane_count() {
+                    if pty.is_running(i) {
+                        let _ = pty.send_line(i, &formatted);
+                    }
+                }
+            }
+            result.to_string()
         }
         "msg_send" => {
             let r = deser!(args, MsgSendRequest);
-            crate::multi_agent::msg_send(&r.from_pane, &r.to_pane, &r.message).to_string()
+            let result = crate::multi_agent::msg_send(&r.from_pane, &r.to_pane, &r.message);
+            // Push to target agent's PTY for real-time delivery
+            if let Ok(pane_num) = r.to_pane.parse::<u8>() {
+                let formatted = format!("[MSG from {}]: {}", r.from_pane, r.message);
+                let mut pty = app.pty_lock();
+                let _ = pty.send_line(pane_num, &formatted);
+            }
+            result.to_string()
         }
         "msg_get" => {
             let r = deser!(args, MsgGetRequest);
             crate::multi_agent::msg_get(&r.pane_id, r.mark_read.unwrap_or(true)).to_string()
+        }
+
+        // === AGENT SIGNALS ===
+        "os_signal" | "signal" => {
+            let r = deser!(args, SignalRequest);
+            crate::multi_agent::signal_send(&r.pane_id, &r.signal_type, &r.message, r.pipeline_id.as_deref()).to_string()
+        }
+        "signal_list" | "signals" | "os_signal_list" => crate::multi_agent::signal_list(true).to_string(),
+        "signal_ack" | "os_signal_ack" => {
+            let r = deser!(args, SignalAckRequest);
+            crate::multi_agent::signal_acknowledge(r.signal_id).to_string()
         }
 
         // === MULTI-AGENT: MISC ===
@@ -661,6 +690,9 @@ pub async fn dispatch_mcp_tool(app: &App, tool: &str, args: Value) -> String {
         "factory_gate_result" | "gate_result" => tools::factory_tools::factory_gate_result(&deser!(args, FactoryStatusRequest)),
         "factory_retry" | "pipeline_retry" | "retry_pipeline" => tools::factory_tools::factory_retry(&deser!(args, FactoryStatusRequest)),
         "factory_events" | "pipeline_events" => tools::factory_tools::factory_events(&deser!(args, FactoryStatusRequest)),
+        "factory_pause" | "pipeline_pause" | "pause" => tools::factory_tools::factory_pause(&deser!(args, FactoryStatusRequest)),
+        "factory_resume" | "pipeline_resume" | "resume" => tools::factory_tools::factory_resume(&deser!(args, FactoryStatusRequest)),
+        "factory_retry_stage" | "retry_stage" => tools::factory_tools::factory_retry_stage(&deser!(args, FactoryRetryStageRequest)),
 
         // === ORCHESTRATION ===
         "orchestrate" => tools::orchestrate::orchestrate(app, deser!(args, OrchestrateRequest)).await,
@@ -756,6 +788,10 @@ pub const MCP_TOOLS: &[(&str, &str)] = &[
     ("msg_broadcast", "Broadcast message"),
     ("msg_send", "Send direct message"),
     ("msg_get", "Get messages"),
+    // Signals
+    ("signal", "Send agent signal (need_help/blocked/found_issue)"),
+    ("signals", "List unack'd agent signals"),
+    ("signal_ack", "Acknowledge signal"),
     // Multi-agent misc
     ("cleanup_all", "Clean stale entries"),
     ("status_overview", "Full status overview"),
@@ -895,6 +931,9 @@ pub const MCP_TOOLS: &[(&str, &str)] = &[
     ("gate", "Run quality gate on pipeline"),
     ("pipeline_conflicts", "Scan pipeline file conflicts"),
     ("factory_cancel", "Cancel a pipeline"),
+    ("factory_pause", "Pause a pipeline"),
+    ("factory_resume", "Resume a paused pipeline"),
+    ("factory_retry_stage", "Retry a specific stage"),
     ("factory_detect", "Detect project from text"),
     ("gate_result", "View saved gate results"),
     // Orchestration
