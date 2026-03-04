@@ -249,6 +249,10 @@ pub async fn auto_cycle(app: &App) -> String {
     let mut actions = Vec::new();
     let mut occupied_panes = Vec::new();
 
+    // Phase 0: Process factory inbox — convert pending requests into pipelines
+    let inbox_actions = crate::factory::process_inbox();
+    actions.extend(inbox_actions);
+
     // Phase 1: Collect status of all running panes
     let state_snap = app.state.get_state_snapshot().await;
     let markers = state_snap.config.completion_markers.clone();

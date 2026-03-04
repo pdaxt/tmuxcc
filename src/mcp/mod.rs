@@ -1723,6 +1723,14 @@ impl AgentOSService {
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
 
+    #[tool(description = "View the factory inbox: TUI-submitted requests, their classification, pipeline mapping, and status. Shows pending/running/complete/failed requests from the command bar.")]
+    async fn factory_inbox(
+        &self,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        let result = tools::factory_tools::factory_inbox();
+        Ok(CallToolResult::success(vec![Content::text(result)]))
+    }
+
     // === ORCHESTRATION ===
 
     #[tool(description = "Orchestrate: say what you want in natural language. AgentOS identifies the project, decomposes into dev + QA + security tasks, spawns agents on free panes, monitors to completion. The 'machine that builds machines' command.")]

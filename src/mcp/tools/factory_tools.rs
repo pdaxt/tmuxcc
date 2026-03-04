@@ -279,6 +279,39 @@ pub fn factory_retry_stage(req: &FactoryRetryStageRequest) -> String {
     }
 }
 
+/// Get factory inbox status — shows TUI-submitted requests and their pipeline mappings.
+pub fn factory_inbox() -> String {
+    let inbox = factory::load_inbox();
+    let summary: Vec<serde_json::Value> = inbox.requests.iter().map(|r| {
+        serde_json::json!({
+            "id": r.id,
+            "request": truncate(&r.request, 60),
+            "status": r.status,
+            "pipeline_id": r.pipeline_id,
+            "classification": r.classification,
+            "task_count": r.tasks.len(),
+            "created_at": r.created_at,
+            "error": r.error,
+        })
+    }).collect();
+
+    let pending = inbox.requests.iter().filter(|r| r.status == "pending").count();
+    let running = inbox.requests.iter().filter(|r| r.status == "running").count();
+    let complete = inbox.requests.iter().filter(|r| r.status == "complete").count();
+    let failed = inbox.requests.iter().filter(|r| r.status == "failed").count();
+
+    serde_json::json!({
+        "requests": summary,
+        "summary": {
+            "pending": pending,
+            "running": running,
+            "complete": complete,
+            "failed": failed,
+            "total": inbox.requests.len(),
+        },
+    }).to_string()
+}
+
 /// Scan for conflicts in a pipeline's project.
 pub fn conflict_scan(req: &FactoryStatusRequest) -> String {
     match &req.pipeline_id {

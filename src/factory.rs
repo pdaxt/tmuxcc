@@ -909,6 +909,218 @@ pub fn retry_stage(pipeline_id: &str, stage_name: &str) -> Result<String> {
 }
 
 // ============================================================
+// Factory Inbox — bridge from TUI/hub_mcp to pipeline system
+// ============================================================
+
+/// A factory inbox request (as written by hub_mcp POST /api/factory/submit)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InboxRequest {
+    pub id: String,
+    pub request: String,
+    #[serde(default = "default_inbox_status")]
+    pub status: String,
+    #[serde(default)]
+    pub classification: serde_json::Value,
+    #[serde(default)]
+    pub tasks: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub pipeline_id: Option<String>,
+    #[serde(default)]
+    pub template: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+fn default_inbox_status() -> String { "pending".into() }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FactoryInbox {
+    #[serde(default)]
+    pub requests: Vec<InboxRequest>,
+}
+
+fn inbox_path() -> std::path::PathBuf {
+    crate::config::agentos_root().join("factory_inbox.json")
+}
+
+pub fn load_inbox() -> FactoryInbox {
+    let path = inbox_path();
+    if path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(inbox) = serde_json::from_str(&content) {
+                return inbox;
+            }
+        }
+    }
+    FactoryInbox::default()
+}
+
+pub fn save_inbox(inbox: &FactoryInbox) -> Result<()> {
+    let path = inbox_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, serde_json::to_string_pretty(inbox)?)?;
+    std::fs::rename(&tmp, &path)?;
+    Ok(())
+}
+
+/// Process the factory inbox: convert pending requests into pipelines,
+/// update running requests with pipeline status.
+/// Returns a list of actions taken (for auto_cycle logging).
+pub fn process_inbox() -> Vec<serde_json::Value> {
+    let mut inbox = load_inbox();
+    let mut actions = Vec::new();
+    let mut changed = false;
+
+    for req in inbox.requests.iter_mut() {
+        match req.status.as_str() {
+            "pending" => {
+                // Classify: detect project from request text
+                let (project, confidence) = match detect_project(&req.request) {
+                    Some(pc) => pc,
+                    None => {
+                        req.status = "failed".into();
+                        req.error = Some("Could not identify project from request".into());
+                        changed = true;
+                        actions.push(serde_json::json!({
+                            "action": "inbox_classify_fail",
+                            "inbox_id": req.id,
+                            "request": req.request,
+                        }));
+                        continue;
+                    }
+                };
+
+                if confidence < 0.2 {
+                    req.status = "failed".into();
+                    req.error = Some(format!(
+                        "Low confidence ({:.0}%) match to '{}'. Be more specific.",
+                        confidence * 100.0, project
+                    ));
+                    changed = true;
+                    actions.push(serde_json::json!({
+                        "action": "inbox_low_confidence",
+                        "inbox_id": req.id,
+                        "project": project,
+                        "confidence": format!("{:.0}%", confidence * 100.0),
+                    }));
+                    continue;
+                }
+
+                // Create pipeline
+                let template = req.template.as_deref().unwrap_or("full");
+                match create_pipeline(&project, &req.request, template, 2) {
+                    Ok((pipeline_id, task_ids)) => {
+                        req.status = "running".into();
+                        req.pipeline_id = Some(pipeline_id.clone());
+                        req.classification = serde_json::json!({
+                            "project": project,
+                            "confidence": format!("{:.0}%", confidence * 100.0),
+                        });
+                        req.tasks = task_ids.iter().map(|id| {
+                            serde_json::json!({"task_id": id})
+                        }).collect();
+                        changed = true;
+                        actions.push(serde_json::json!({
+                            "action": "inbox_pipeline_created",
+                            "inbox_id": req.id,
+                            "pipeline_id": pipeline_id,
+                            "project": project,
+                            "template": template,
+                            "task_count": task_ids.len(),
+                        }));
+                    }
+                    Err(e) => {
+                        req.status = "failed".into();
+                        req.error = Some(format!("Pipeline creation failed: {}", e));
+                        changed = true;
+                        actions.push(serde_json::json!({
+                            "action": "inbox_pipeline_fail",
+                            "inbox_id": req.id,
+                            "error": e.to_string(),
+                        }));
+                    }
+                }
+            }
+            "running" => {
+                // Check if the pipeline is done
+                if let Some(ref pid) = req.pipeline_id {
+                    if let Some(pipeline) = get_pipeline(pid) {
+                        match pipeline.status.as_str() {
+                            "done" => {
+                                req.status = "complete".into();
+                                req.tasks = pipeline.stages.iter().map(|s| {
+                                    serde_json::json!({
+                                        "task_id": s.task_id,
+                                        "stage": s.name,
+                                        "role": s.role,
+                                        "status": s.status,
+                                    })
+                                }).collect();
+                                changed = true;
+                                actions.push(serde_json::json!({
+                                    "action": "inbox_complete",
+                                    "inbox_id": req.id,
+                                    "pipeline_id": pid,
+                                }));
+                            }
+                            "failed" => {
+                                req.status = "failed".into();
+                                req.error = Some("Pipeline failed".into());
+                                req.tasks = pipeline.stages.iter().map(|s| {
+                                    serde_json::json!({
+                                        "task_id": s.task_id,
+                                        "stage": s.name,
+                                        "role": s.role,
+                                        "status": s.status,
+                                        "summary": s.summary,
+                                    })
+                                }).collect();
+                                changed = true;
+                                actions.push(serde_json::json!({
+                                    "action": "inbox_failed",
+                                    "inbox_id": req.id,
+                                    "pipeline_id": pid,
+                                }));
+                            }
+                            _ => {
+                                // Still running — update task statuses for TUI display
+                                let new_tasks: Vec<serde_json::Value> = pipeline.stages.iter().map(|s| {
+                                    serde_json::json!({
+                                        "task_id": s.task_id,
+                                        "stage": s.name,
+                                        "role": s.role,
+                                        "status": s.status,
+                                        "pane": s.pane,
+                                    })
+                                }).collect();
+                                if serde_json::to_string(&new_tasks).unwrap_or_default()
+                                    != serde_json::to_string(&req.tasks).unwrap_or_default()
+                                {
+                                    req.tasks = new_tasks;
+                                    changed = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {} // "complete", "failed" — no action needed
+        }
+    }
+
+    if changed {
+        let _ = save_inbox(&inbox);
+    }
+
+    actions
+}
+
+// ============================================================
 // Tests
 // ============================================================
 
