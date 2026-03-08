@@ -5,6 +5,7 @@ pub mod app;
 pub mod github;
 pub mod mcp;
 pub mod monitor;
+pub mod panels;
 pub mod parsers;
 pub mod pty;
 pub mod state_reader;
