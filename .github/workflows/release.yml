@@ -13,37 +13,68 @@ permissions:
 
 jobs:
   build-release:
-    name: Build Release
+    name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact: tmuxcc
+            binary: dx
+            archive: dx-terminal-$TAG-x86_64-linux.tar.gz
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            binary: dx
+            archive: dx-terminal-$TAG-aarch64-linux.tar.gz
+            cross: true
           - os: macos-latest
             target: x86_64-apple-darwin
-            artifact: tmuxcc
+            binary: dx
+            archive: dx-terminal-$TAG-x86_64-macos.tar.gz
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact: tmuxcc
+            binary: dx
+            archive: dx-terminal-$TAG-aarch64-macos.tar.gz
     steps:
       - uses: actions/checkout@v4
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.cross
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
+
       - name: Package
         run: |
+          TAG="${GITHUB_REF_NAME}"
           cd target/${{ matrix.target }}/release
-          tar czf ../../../tmuxcc-${{ github.ref_name }}-${{ matrix.target }}.tar.gz ${{ matrix.artifact }}
+          tar czf ../../../dx-terminal-${TAG}-${{ matrix.target }}.tar.gz ${{ matrix.binary }}
+
+      - name: Generate SHA256
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          shasum -a 256 dx-terminal-${TAG}-${{ matrix.target }}.tar.gz > dx-terminal-${TAG}-${{ matrix.target }}.tar.gz.sha256 || \
+          sha256sum dx-terminal-${TAG}-${{ matrix.target }}.tar.gz > dx-terminal-${TAG}-${{ matrix.target }}.tar.gz.sha256
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: tmuxcc-${{ matrix.target }}
-          path: tmuxcc-${{ github.ref_name }}-${{ matrix.target }}.tar.gz
+          name: dx-terminal-${{ matrix.target }}
+          path: |
+            dx-terminal-*.tar.gz
+            dx-terminal-*.tar.gz.sha256
 
   create-release:
     name: Create Release
@@ -51,19 +82,39 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: artifacts/*
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.sha256
           generate_release_notes: true
+          body: |
+            ## Install
+
+            **Homebrew (macOS/Linux):**
+            ```bash
+            brew install pdaxt/tap/dx-terminal
+            ```
+
+            **Cargo:**
+            ```bash
+            cargo install dx-terminal
+            ```
+
+            **Manual download:**
+            Download the archive for your platform below, extract, and put `dx` in your PATH.
 
   publish-crates:
     name: Publish to crates.io
+    needs: create-release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
