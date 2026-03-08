@@ -85,6 +85,8 @@ pub enum Action {
     PreviewScrollDown,
     /// Scroll preview to bottom (latest)
     PreviewScrollBottom,
+    /// Toggle analytics panel visibility
+    ToggleAnalytics,
     /// No action (used for unbound keys)
     None,
 }
@@ -135,6 +137,7 @@ impl Action {
             Action::PreviewScrollUp => "Scroll preview up",
             Action::PreviewScrollDown => "Scroll preview down",
             Action::PreviewScrollBottom => "Scroll to bottom",
+            Action::ToggleAnalytics => "Toggle analytics panel",
             Action::None => "",
         }
     }

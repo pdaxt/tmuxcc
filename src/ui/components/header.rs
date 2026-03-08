@@ -27,9 +27,13 @@ impl HeaderWidget {
             .count();
         let time = Local::now().format("%H:%M").to_string();
 
+        // Session cost from usage tracker
+        let session_cost = state.usage_tracker.session_cost();
+        let today_cost = state.usage_tracker.today_cost();
+
         let mut spans = vec![
             Span::styled(
-                " AgentOS ",
+                " DX ",
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
@@ -40,6 +44,22 @@ impl HeaderWidget {
                 Style::default().fg(Color::White),
             ),
         ];
+
+        // Session cost (always visible when > 0)
+        if session_cost > 0.001 || today_cost > 0.001 {
+            spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
+            let cost_color = if today_cost > 5.0 {
+                Color::Red
+            } else if today_cost > 1.0 {
+                Color::Yellow
+            } else {
+                Color::Green
+            };
+            spans.push(Span::styled(
+                format!(" ${:.2} session ${:.2} today ", session_cost, today_cost),
+                Style::default().fg(cost_color),
+            ));
+        }
 
         // Processing count
         if processing > 0 {
@@ -161,12 +181,12 @@ impl HeaderWidget {
             Style::default().fg(mem_color),
         ));
 
-        // AgentOS connection status
+        // API connection status
         spans.push(Span::styled("│", Style::default().fg(Color::DarkGray)));
         if state.agentos_connected {
-            spans.push(Span::styled(" OS ", Style::default().fg(Color::Green)));
+            spans.push(Span::styled(" API ", Style::default().fg(Color::Green)));
         } else {
-            spans.push(Span::styled(" OS ", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(" API ", Style::default().fg(Color::DarkGray)));
         }
 
         // Time

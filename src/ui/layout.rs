@@ -19,25 +19,38 @@ impl Layout {
         Self::main_layout_all(area, show_queue, show_dashboard, false)
     }
 
-    /// Creates the main layout with all optional panels including factory
+    /// Creates the main layout with all optional panels including factory and analytics
     pub fn main_layout_all(
         area: Rect,
         show_queue: bool,
         show_dashboard: bool,
         show_factory: bool,
     ) -> Vec<Rect> {
+        Self::main_layout_all_with_analytics(area, show_queue, show_dashboard, show_factory, false)
+    }
+
+    /// Creates the main layout with all optional panels
+    pub fn main_layout_all_with_analytics(
+        area: Rect,
+        show_queue: bool,
+        show_dashboard: bool,
+        show_factory: bool,
+        show_analytics: bool,
+    ) -> Vec<Rect> {
         let queue_height = if show_queue { 8 } else { 0 };
         let dashboard_height = if show_dashboard { 12 } else { 0 };
         let factory_height = if show_factory { 10 } else { 0 };
+        let analytics_height = if show_analytics { 10 } else { 0 };
         ratatui::layout::Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),                 // Header
-                Constraint::Min(10),                   // Content area (agents + preview)
-                Constraint::Length(queue_height),       // Queue panel
-                Constraint::Length(dashboard_height),   // Dashboard panel
-                Constraint::Length(factory_height),     // Factory panel
-                Constraint::Length(1),                  // Footer
+                Constraint::Length(3),                 // [0] Header
+                Constraint::Min(10),                   // [1] Content area (agents + preview)
+                Constraint::Length(analytics_height),   // [2] Analytics panel
+                Constraint::Length(queue_height),       // [3] Queue panel
+                Constraint::Length(dashboard_height),   // [4] Dashboard panel
+                Constraint::Length(factory_height),     // [5] Factory panel
+                Constraint::Length(1),                  // [6] Footer
             ])
             .split(area)
             .to_vec()

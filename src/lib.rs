@@ -1,8 +1,12 @@
 pub mod agentos;
 pub mod agents;
+pub mod analytics;
 pub mod app;
+pub mod github;
+pub mod mcp;
 pub mod monitor;
 pub mod parsers;
+pub mod pty;
 pub mod state_reader;
 pub mod tmux;
 pub mod ui;

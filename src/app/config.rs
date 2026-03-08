@@ -16,6 +16,10 @@ pub struct Config {
     /// AgentOS API URL (e.g. http://localhost:3100)
     #[serde(default)]
     pub agentos_url: Option<String>,
+
+    /// Native PTY mode — own processes directly instead of using tmux
+    #[serde(default)]
+    pub native_mode: bool,
 }
 
 fn default_poll_interval() -> u64 {
@@ -32,6 +36,7 @@ impl Default for Config {
             poll_interval_ms: default_poll_interval(),
             capture_lines: default_capture_lines(),
             agentos_url: None,
+            native_mode: false,
         }
     }
 }
@@ -39,7 +44,7 @@ impl Default for Config {
 impl Config {
     /// Returns the default config file path
     pub fn default_path() -> Option<PathBuf> {
-        dirs::config_dir().map(|p| p.join("agentos-tui").join("config.toml"))
+        dirs::config_dir().map(|p| p.join("dx-terminal").join("config.toml"))
     }
 
     /// Loads config from the default path or returns defaults
@@ -90,6 +95,7 @@ mod tests {
         let config = Config::default();
         assert_eq!(config.poll_interval_ms, 500);
         assert_eq!(config.capture_lines, 100);
+        assert!(!config.native_mode);
     }
 
     #[test]

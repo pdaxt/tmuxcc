@@ -3,8 +3,8 @@ use clap::Parser;
 use std::path::PathBuf;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use agentos_tui::app::Config;
-use agentos_tui::ui::run_app;
+use dx_terminal::app::Config;
+use dx_terminal::ui::run_app;
 
 /// Install a panic hook that restores the terminal before printing the panic.
 fn install_panic_hook() {
@@ -23,9 +23,9 @@ fn install_panic_hook() {
 }
 
 #[derive(Parser)]
-#[command(name = "agentos-tui")]
+#[command(name = "dx")]
 #[command(author, version, about, long_about = None)]
-#[command(about = "AgentOS Terminal - Mission control for AI agent orchestration")]
+#[command(about = "DX Terminal — AI-native terminal multiplexer")]
 struct Cli {
     /// Polling interval (milliseconds)
     #[arg(short, long, default_value = "500", value_name = "MS")]
@@ -43,7 +43,11 @@ struct Cli {
     #[arg(long, value_name = "URL")]
     agentos_url: Option<String>,
 
-    /// Write debug logs to agentos-tui.log
+    /// Native PTY mode — own terminal processes directly (no tmux dependency)
+    #[arg(long)]
+    native: bool,
+
+    /// Write debug logs to dx-terminal.log
     #[arg(short, long)]
     debug: bool,
 
@@ -88,7 +92,7 @@ async fn main() -> Result<()> {
     if cli.debug {
         let log_dir = dirs::cache_dir()
             .unwrap_or_else(|| PathBuf::from("/tmp"))
-            .join("agentos-tui");
+            .join("dx-terminal");
         let _ = std::fs::create_dir_all(&log_dir);
         let log_file = std::fs::File::create(log_dir.join("debug.log"))?;
         let file_layer = tracing_subscriber::fmt::layer()
@@ -114,6 +118,7 @@ async fn main() -> Result<()> {
     // CLI args override config file
     config.poll_interval_ms = cli.poll_interval;
     config.capture_lines = cli.capture_lines;
+    config.native_mode = cli.native;
     if let Some(url) = cli.agentos_url {
         config.agentos_url = Some(url);
     }

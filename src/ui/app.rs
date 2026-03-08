@@ -18,11 +18,13 @@ use crate::agentos::AgentOSClient;
 use crate::app::{Action, AppState, Config};
 use crate::monitor::{FactoryCommand, MonitorTask, SystemStatsCollector};
 use crate::parsers::ParserRegistry;
+use crate::pty::PtyManager;
 use crate::tmux::TmuxClient;
 
 use super::components::{
-    AgentTreeWidget, DashboardWidget, FactoryPanelWidget, FooterWidget, HeaderWidget, HelpWidget,
-    InputWidget, PanePreviewWidget, QueuePanelWidget, SubagentLogWidget,
+    AgentTreeWidget, AnalyticsWidget, DashboardWidget, FactoryPanelWidget, FooterWidget,
+    HeaderWidget, HelpWidget, InputWidget, PanePreviewWidget, QueuePanelWidget,
+    SubagentLogWidget,
 };
 use super::Layout;
 
@@ -37,17 +39,24 @@ pub async fn run_app(config: Config) -> Result<()> {
 
     // Initialize state
     let mut state = AppState::new();
+    let native_mode = config.native_mode;
 
     // Create tmux client and parser registry
     let tmux_client = Arc::new(TmuxClient::with_capture_lines(config.capture_lines));
     let parser_registry = Arc::new(ParserRegistry::new());
 
-    // Check if tmux is available
-    if !tmux_client.is_available() {
-        state.set_error(
-            "tmux is not running (agents from AgentOS API will still appear)".to_string(),
-        );
-    }
+    // Native mode: create PTY manager; otherwise check tmux
+    let mut pty_manager = if native_mode {
+        state.flash("DX Terminal — native PTY mode".to_string());
+        Some(PtyManager::new())
+    } else {
+        if !tmux_client.is_available() {
+            state.set_error(
+                "tmux is not running. Use --native for native PTY mode.".to_string(),
+            );
+        }
+        None
+    };
 
     // Create AgentOS client if URL configured
     let agentos_client = config
@@ -61,7 +70,7 @@ pub async fn run_app(config: Config) -> Result<()> {
     // Create channel for factory commands (TUI → monitor)
     let (factory_tx, factory_rx) = mpsc::channel(8);
 
-    // Start monitor task
+    // Start monitor task (watches tmux panes + AgentOS API)
     let monitor = MonitorTask::new(
         tmux_client.clone(),
         parser_registry.clone(),
@@ -85,6 +94,7 @@ pub async fn run_app(config: Config) -> Result<()> {
         &tmux_client,
         &mut system_stats,
         &factory_tx,
+        &mut pty_manager,
     )
     .await;
 
@@ -108,6 +118,7 @@ async fn run_loop(
     tmux_client: &TmuxClient,
     system_stats: &mut SystemStatsCollector,
     factory_tx: &mpsc::Sender<FactoryCommand>,
+    pty_manager: &mut Option<PtyManager>,
 ) -> Result<()> {
     loop {
         // Advance animation tick
@@ -117,14 +128,25 @@ async fn run_loop(
         system_stats.refresh();
         state.system_stats = system_stats.stats().clone();
 
+        // Process PTY events in native mode
+        if let Some(ref mut mgr) = pty_manager {
+            mgr.process_events().await;
+        }
+
+        // Periodically refresh git info (~every 60 ticks = ~5s)
+        if state.tick % 60 == 0 {
+            state.refresh_git_info();
+        }
+
         // Draw UI
         terminal.draw(|frame| {
             let size = frame.area();
-            let main_chunks = Layout::main_layout_all(
+            let main_chunks = Layout::main_layout_all_with_analytics(
                 size,
                 state.show_queue,
                 state.show_dashboard,
                 state.show_factory,
+                state.show_analytics,
             );
 
             // Header
@@ -168,23 +190,33 @@ async fn run_loop(
                 InputWidget::render(frame, input_area, state);
             }
 
+            // Analytics panel (only when visible)
+            if state.show_analytics {
+                AnalyticsWidget::render(
+                    frame,
+                    main_chunks[2],
+                    &state.usage_tracker,
+                    &state.git_info_cache,
+                );
+            }
+
             // Queue panel (only when visible)
             if state.show_queue {
-                QueuePanelWidget::render(frame, main_chunks[2], state);
+                QueuePanelWidget::render(frame, main_chunks[3], state);
             }
 
             // Dashboard panel (only when visible)
             if state.show_dashboard {
-                DashboardWidget::render(frame, main_chunks[3], state);
+                DashboardWidget::render(frame, main_chunks[4], state);
             }
 
             // Factory panel (only when visible)
             if state.show_factory {
-                FactoryPanelWidget::render(frame, main_chunks[4], state);
+                FactoryPanelWidget::render(frame, main_chunks[5], state);
             }
 
             // Footer
-            FooterWidget::render(frame, main_chunks[5], state);
+            FooterWidget::render(frame, main_chunks[6], state);
 
             // Help overlay
             if state.show_help {
@@ -216,6 +248,15 @@ async fn run_loop(
                 if let Some(f) = update.factory_requests {
                     state.factory_requests = f;
                 }
+                // Populate agent branches from git cache
+                for agent in state.agents.root_agents.iter_mut() {
+                    if agent.branch.is_none() || agent.branch.as_deref() == Some("") {
+                        if let Some(info) = state.git_info_cache.get(&agent.path) {
+                            agent.branch = Some(info.branch.clone());
+                        }
+                    }
+                }
+
                 // Ensure selected index is valid
                 if state.selected_index >= state.agents.root_agents.len() {
                     state.selected_index = state.agents.root_agents.len().saturating_sub(1);
@@ -235,8 +276,8 @@ async fn run_loop(
                     if let Event::Mouse(mouse) = event {
                         let size = terminal.size()?;
                         let area = ratatui::layout::Rect::new(0, 0, size.width, size.height);
-                        let main_chunks = Layout::main_layout_all(area, state.show_queue, state.show_dashboard, state.show_factory);
-                        let footer_area = main_chunks[4];
+                        let main_chunks = Layout::main_layout_all_with_analytics(area, state.show_queue, state.show_dashboard, state.show_factory, state.show_analytics);
+                        let footer_area = main_chunks[6];
                         let (sidebar, _, _, input_area) = Layout::content_layout_with_input(
                             main_chunks[1], state.sidebar_width, 3, state.show_summary_detail
                         );
@@ -476,13 +517,23 @@ async fn run_loop(
                                     if let Some(agent) = state.selected_agent() {
                                         let target = agent.target.clone();
                                         let agent_path = agent.abbreviated_path();
-                                        // Send literal text (handles special chars safely)
-                                        if let Err(e) = tmux_client.send_keys_literal(&target, &input) {
-                                            state.set_error(format!("Failed to send input: {}", e));
-                                        } else if let Err(e) = tmux_client.send_keys(&target, "Enter") {
-                                            state.set_error(format!("Failed to send Enter: {}", e));
+                                        let pane_num = agent.pane as u8 + 1;
+
+                                        // Use PTY manager in native mode, tmux otherwise
+                                        if let Some(ref mgr) = pty_manager {
+                                            if let Err(e) = mgr.send_input(pane_num, &input) {
+                                                state.set_error(format!("Failed to send input: {}", e));
+                                            } else {
+                                                state.flash(format!("Sent to {}", agent_path));
+                                            }
                                         } else {
-                                            state.flash(format!("Sent to {}", agent_path));
+                                            if let Err(e) = tmux_client.send_keys_literal(&target, &input) {
+                                                state.set_error(format!("Failed to send input: {}", e));
+                                            } else if let Err(e) = tmux_client.send_keys(&target, "Enter") {
+                                                state.set_error(format!("Failed to send Enter: {}", e));
+                                            } else {
+                                                state.flash(format!("Sent to {}", agent_path));
+                                            }
                                         }
                                     }
                                 }
@@ -541,6 +592,9 @@ async fn run_loop(
                             }
                             Action::ToggleFactory => {
                                 state.toggle_factory();
+                            }
+                            Action::ToggleAnalytics => {
+                                state.toggle_analytics();
                             }
                             Action::EnterCommandBar => {
                                 state.take_input(); // Clear any existing input
@@ -672,6 +726,7 @@ fn map_key_to_action(code: KeyCode, modifiers: KeyModifiers, state: &AppState) -
         KeyCode::Char('Q') => Action::ToggleQueue,
         KeyCode::Char('D') => Action::ToggleDashboard,
         KeyCode::Char('P') => Action::ToggleFactory,
+        KeyCode::Char('X') => Action::ToggleAnalytics,
         KeyCode::Char(':') => Action::EnterCommandBar,
         KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => Action::PreviewScrollUp,
         KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {

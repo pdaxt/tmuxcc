@@ -1,4 +1,5 @@
 mod agent_tree;
+mod analytics_panel;
 mod dashboard_panel;
 mod factory_panel;
 mod footer;
@@ -10,6 +11,7 @@ mod queue_panel;
 mod subagent_log;
 
 pub use agent_tree::AgentTreeWidget;
+pub use analytics_panel::AnalyticsWidget;
 pub use dashboard_panel::DashboardWidget;
 pub use factory_panel::FactoryPanelWidget;
 pub use footer::{FooterButton, FooterWidget};

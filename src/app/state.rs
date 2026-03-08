@@ -1,8 +1,10 @@
 use crate::agentos::{AgentOSQueueTask, AlertsResponse, AnalyticsDigest, FactoryRequest};
 use crate::agents::MonitoredAgent;
+use crate::analytics::UsageTracker;
+use crate::github::{GitHubTracker, GitInfo};
 use crate::monitor::SystemStats;
 use crate::state_reader::DashboardData;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 /// Which panel is currently focused
@@ -133,6 +135,14 @@ pub struct AppState {
     pub digest: AnalyticsDigest,
     /// Active alerts from AgentOS API
     pub alerts: AlertsResponse,
+    /// Token usage tracker (persists to SQLite)
+    pub usage_tracker: UsageTracker,
+    /// GitHub/git info per project path
+    pub github_tracker: GitHubTracker,
+    /// Cached git info for UI rendering (refreshed periodically)
+    pub git_info_cache: HashMap<String, GitInfo>,
+    /// Whether analytics panel is shown
+    pub show_analytics: bool,
 }
 
 impl AppState {
@@ -165,6 +175,10 @@ impl AppState {
             factory_requests: Vec::new(),
             digest: AnalyticsDigest::default(),
             alerts: AlertsResponse::default(),
+            usage_tracker: UsageTracker::new(),
+            github_tracker: GitHubTracker::new(),
+            git_info_cache: HashMap::new(),
+            show_analytics: true,
         }
     }
 
@@ -417,6 +431,23 @@ impl AppState {
     /// Toggles factory panel visibility
     pub fn toggle_factory(&mut self) {
         self.show_factory = !self.show_factory;
+    }
+
+    /// Toggles analytics panel visibility
+    pub fn toggle_analytics(&mut self) {
+        self.show_analytics = !self.show_analytics;
+    }
+
+    /// Refresh git info for all tracked agent paths
+    pub fn refresh_git_info(&mut self) {
+        let paths: Vec<String> = self.agents.root_agents.iter()
+            .map(|a| a.path.clone())
+            .filter(|p| !p.is_empty())
+            .collect();
+        for path in paths {
+            let info = self.github_tracker.get_info(&path).clone();
+            self.git_info_cache.insert(path, info);
+        }
     }
 
     /// Sets an error message
