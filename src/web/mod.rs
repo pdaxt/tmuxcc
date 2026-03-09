@@ -1,5 +1,6 @@
 pub mod api;
 pub mod sse;
+pub mod ws;
 
 use std::sync::Arc;
 use axum::{
@@ -48,6 +49,8 @@ pub fn build_router(app: Arc<App>) -> Router {
         .route("/api/analytics/overview", get(api::get_analytics_overview))
         // SSE events
         .route("/api/events", get(sse::event_stream))
+        // WebSocket — real-time bidirectional
+        .route("/ws", get(ws::ws_handler))
         .layer(CorsLayer::permissive())
         .with_state(app)
 }

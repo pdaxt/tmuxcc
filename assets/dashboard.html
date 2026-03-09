@@ -624,17 +624,230 @@ function drawBurndown(bd){
   }
 }
 
-// === SSE ===
-function connectSSE(){
-  const es=new EventSource('/api/events');
-  es.onmessage=(e)=>{
-    try{const d=JSON.parse(e.data);if(d.type==='queue_changed')renderQueue();else refresh();}
-    catch(_){refresh();}
+// === WebSocket — Real-time bidirectional ===
+let ws=null;
+let wsState=null; // Full state from init message
+let paneOutputs={}; // pane -> accumulated output string
+let activePaneModal=null;
+
+function connectWS(){
+  const proto=location.protocol==='https:'?'wss:':'ws:';
+  ws=new WebSocket(`${proto}//${location.host}/ws`);
+
+  ws.onopen=()=>{
+    console.log('WS connected');
+    document.getElementById('status-indicator').textContent='CONNECTED';
+    document.getElementById('status-indicator').className='status-badge status-ok';
   };
-  es.onerror=()=>{setTimeout(connectSSE,5000);es.close();};
+
+  ws.onmessage=(e)=>{
+    try{
+      const msg=JSON.parse(e.data);
+      handleWSMessage(msg);
+    }catch(err){console.error('WS parse error',err);}
+  };
+
+  ws.onclose=()=>{
+    console.log('WS disconnected, reconnecting...');
+    document.getElementById('status-indicator').textContent='RECONNECTING';
+    document.getElementById('status-indicator').className='status-badge status-warn';
+    setTimeout(connectWS,2000);
+  };
+
+  ws.onerror=()=>{ws.close();};
 }
 
-// === Refresh ===
+function handleWSMessage(msg){
+  updateTimestamp();
+  switch(msg.type){
+    case 'init':
+      wsState=msg.data;
+      // Store initial outputs
+      for(const p of wsState.panes||[]){
+        if(p.output) paneOutputs[p.pane]=p.output;
+      }
+      renderFromWS();
+      break;
+    case 'terminal_output':
+      for(const u of msg.updates||[]){
+        const prev=paneOutputs[u.pane]||'';
+        paneOutputs[u.pane]=prev+u.output;
+        // Keep max 5000 chars per pane
+        if(paneOutputs[u.pane].length>5000){
+          paneOutputs[u.pane]=paneOutputs[u.pane].slice(-4000);
+        }
+        // If this pane's modal is open, update it live
+        if(activePaneModal===u.pane){
+          const termEl=document.getElementById('modal-output');
+          if(termEl){
+            termEl.textContent=paneOutputs[u.pane];
+            termEl.scrollTop=termEl.scrollHeight;
+          }
+        }
+        // Update line count badge
+        const badge=document.getElementById(`pane-lines-${u.pane}`);
+        if(badge) badge.textContent=u.full_lines+'L';
+      }
+      break;
+    case 'pane_spawned':
+    case 'pane_killed':
+    case 'pane_status':
+      // Refresh full state on structural changes
+      refresh();
+      break;
+    case 'log':
+      addLogEntry(msg);
+      break;
+    case 'queue':
+      renderQueue();
+      break;
+    case 'cmd_result':
+      showCmdResult(msg);
+      break;
+    case 'refresh':
+      refresh();
+      break;
+  }
+}
+
+function addLogEntry(msg){
+  const el=document.getElementById('logs');
+  const now=new Date();
+  const ts=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+  const entry=document.createElement('div');
+  entry.className='log-entry';
+  entry.innerHTML=`<span class="log-ts">${ts}</span><span class="log-pane">P${msg.pane}</span><span class="log-msg">${msg.summary||msg.event||''}</span>`;
+  el.insertBefore(entry,el.firstChild);
+  // Keep max 30 entries
+  while(el.children.length>30) el.removeChild(el.lastChild);
+}
+
+function showCmdResult(msg){
+  const r=msg.result;
+  const status=r.error?'ERROR':'OK';
+  const text=r.error||r.status||JSON.stringify(r).slice(0,80);
+  // Flash in status bar
+  const ind=document.getElementById('status-indicator');
+  ind.textContent=`${msg.cmd}: ${status}`;
+  ind.className=r.error?'status-badge status-alert':'status-badge status-ok';
+  setTimeout(()=>{ind.textContent=wsState?'LIVE':'IDLE';ind.className='status-badge status-ok';},3000);
+}
+
+// Send command to server via WS
+function wsSend(cmd){
+  if(ws&&ws.readyState===WebSocket.OPEN){
+    ws.send(JSON.stringify(cmd));
+  }
+}
+
+// === Render from WS state ===
+function renderFromWS(){
+  if(!wsState) return;
+  renderPanesFromWS();
+  renderGaugesFromWS();
+  renderLogsFromMonitor();
+  renderQueue();
+  renderBoard();
+}
+
+function renderPanesFromWS(){
+  if(!wsState||!wsState.panes) return;
+  const el=document.getElementById('panes');
+  let html='';
+  for(const p of wsState.panes){
+    const isActive=p.status==='active';
+    const hasProject=p.project&&p.project!=='--';
+    const color=getThemeColor(p.pane);
+    const hasOutput=!!paneOutputs[p.pane];
+
+    if(!isActive&&!hasProject){
+      html+=`<div class="pane-card idle" style="border-left-color:${color}" onclick="openPaneLive(${p.pane})">
+        <div class="pane-top" style="margin-bottom:0">
+          <span class="pane-num" style="background:${color}">${p.pane}</span>
+          <span class="pane-status s-idle">available</span>
+        </div>
+      </div>`;
+    } else {
+      html+=`<div class="pane-card ${isActive?'active':'idle'}" style="border-left-color:${color}" onclick="openPaneLive(${p.pane})">
+        <div class="pane-top">
+          <span class="pane-num" style="background:${color}">${p.pane}</span>
+          <span class="pane-status ${isActive?'s-active':'s-idle'}">${p.status}</span>
+        </div>
+        <div class="pane-project">${p.project||'--'}</div>
+        <div class="pane-task">${p.task||'No task'}</div>
+        <div class="pane-meta">
+          ${p.role&&p.role!=='--'?`<span class="badge badge-role">${p.role}</span>`:''}
+          <span class="badge badge-lines" id="pane-lines-${p.pane}">${p.line_count||0}L</span>
+          ${hasOutput?'<span class="badge badge-pty" title="Has terminal output">LIVE</span>':''}
+        </div>
+      </div>`;
+    }
+  }
+  el.innerHTML=html;
+}
+
+function renderGaugesFromWS(){
+  if(!wsState) return;
+  const active=wsState.active_count||0;
+  const total=wsState.total_panes||9;
+  const q=wsState.queue||{};
+  document.getElementById('gauges').innerHTML=`
+    <div class="card c-blue"><h3>Agents</h3><div class="gauge-val">${active}<span style="font-size:14px;color:var(--muted)"> / ${total}</span></div>
+      <div class="gauge-sub">${total-active} idle</div>
+      <div class="gauge-bar"><div class="gauge-fill" style="width:${active/total*100}%;background:var(--blue)"></div></div></div>
+    <div class="card c-green"><h3>Screens</h3><div class="gauge-val">${wsState.screens?wsState.screens.count:1}</div>
+      <div class="gauge-sub">${wsState.screens&&wsState.screens.names?wsState.screens.names.join(', '):'default'}</div>
+      <div class="gauge-bar"><div class="gauge-fill" style="width:100%;background:var(--green)"></div></div></div>
+    <div class="card ${q.pending>5?'c-yellow':'c-green'}"><h3>Queue</h3><div class="gauge-val">${q.pending||0}<span style="font-size:14px;color:var(--muted)"> pending</span></div>
+      <div class="gauge-sub">${q.running||0} running · ${q.done||0} done${q.failed?' · <span style=color:var(--red)>'+q.failed+' failed</span>':''}</div>
+      <div class="gauge-bar"><div class="gauge-fill" style="width:${Math.min((q.running||0)/Math.max(total,1)*100,100)}%;background:var(--green)"></div></div></div>
+    <div class="card"><h3>WebSocket</h3><div class="gauge-val" style="color:var(--green)">LIVE</div>
+      <div class="gauge-sub">Real-time · 1s updates</div>
+      <div class="gauge-bar"><div class="gauge-fill" style="width:100%;background:var(--green)"></div></div></div>`;
+}
+
+// === Live Pane Modal (with terminal output + command input) ===
+function openPaneLive(paneNum){
+  activePaneModal=paneNum;
+  const p=wsState&&wsState.panes?wsState.panes.find(x=>x.pane===paneNum):null;
+  const color=getThemeColor(paneNum);
+
+  document.getElementById('modal-title').innerHTML=
+    `<span class="pane-num" style="background:${color}">${paneNum}</span> ${p?p.theme:'--'} — ${p&&p.project!=='--'?p.project:'idle'}`;
+
+  document.getElementById('modal-meta').innerHTML=`
+    <div><dt>Status</dt><dd>${p?p.status:'idle'}</dd></div>
+    <div><dt>Role</dt><dd>${p&&p.role!=='--'?p.role:'--'}</dd></div>
+    <div><dt>Task</dt><dd>${p?p.task:'--'}</dd></div>`;
+
+  document.getElementById('modal-errors').innerHTML=`
+    <div style="display:flex;gap:6px;margin-top:8px">
+      <button onclick="wsSend({cmd:'kill',pane:'${paneNum}',reason:'web dashboard'})" style="background:var(--red);color:#fff;border:none;padding:4px 12px;border-radius:4px;font-size:11px;font-weight:700;cursor:pointer">Kill</button>
+      <button onclick="wsSend({cmd:'capture',pane:${paneNum}})" style="background:var(--blue);color:#fff;border:none;padding:4px 12px;border-radius:4px;font-size:11px;font-weight:700;cursor:pointer">Refresh</button>
+    </div>
+    <div style="margin-top:8px;display:flex;gap:6px">
+      <input id="talk-input" placeholder="Send message to agent..." style="flex:1;background:#21262d;color:var(--text);border:1px solid var(--border);padding:6px 10px;border-radius:4px;font-size:12px;font-family:monospace"
+        onkeydown="if(event.key==='Enter'){wsSend({cmd:'talk',pane:${paneNum},message:this.value});this.value=''}">
+      <button onclick="const i=document.getElementById('talk-input');wsSend({cmd:'talk',pane:${paneNum},message:i.value});i.value=''" style="background:var(--green);color:#000;border:none;padding:4px 12px;border-radius:4px;font-size:11px;font-weight:700;cursor:pointer">Send</button>
+    </div>`;
+
+  const output=paneOutputs[paneNum]||'[No output captured yet — output streams in real-time]';
+  const termEl=document.getElementById('modal-output');
+  termEl.textContent=output;
+  document.getElementById('modal').classList.add('open');
+  termEl.scrollTop=termEl.scrollHeight;
+
+  // Request fresh capture
+  wsSend({cmd:'capture',pane:paneNum});
+}
+
+function closeModal(){
+  activePaneModal=null;
+  document.getElementById('modal').classList.remove('open');
+  if(pollTimer){clearInterval(pollTimer);pollTimer=null;}
+}
+
+// === Refresh (fallback for structural changes) ===
 async function refresh(){
   currentSpace=document.getElementById('space-select').value;
   await loadMonitor();
@@ -645,9 +858,11 @@ async function refresh(){
 
 async function init(){
   await loadSpaces();
+  // Initial load via HTTP (fast), then switch to WS
   await refresh();
-  connectSSE();
-  setInterval(refresh,8000);
+  connectWS();
+  // Slow fallback poll (30s) in case WS drops
+  setInterval(refresh,30000);
 }
 init();
 </script>
