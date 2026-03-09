@@ -312,7 +312,16 @@ async fn execute_command(app: &App, cmd: TuiCommand) -> TuiResult {
         }
         TuiCommand::Talk { pane, message } => {
             let desc = format!("Talk P{}", pane);
-            let send_result = {
+            // Tmux-first: get target from state
+            let pane_data = app.state.blocking_read();
+            let tmux_target = pane_data.panes.get(&pane.to_string())
+                .and_then(|p| p.tmux_target.clone());
+            drop(pane_data);
+
+            let send_result = if let Some(target) = tmux_target {
+                crate::tmux::send_command(&target, &message)
+            } else {
+                // PTY fallback
                 let mut pty = app.pty_lock();
                 pty.send_line(pane, &message)
             };

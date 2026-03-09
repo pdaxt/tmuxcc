@@ -250,35 +250,77 @@ pub fn collect_data(app: &App, selected: u8, view_mode: ViewMode, feature_cursor
     }).collect();
 
     let markers = state.config.completion_markers.clone();
+
+    // Collect tmux targets before dropping state lock
+    let tmux_targets: Vec<(u8, Option<String>)> = panes.iter().map(|ps| {
+        let pd = state.panes.get(&ps.pane.to_string());
+        (ps.pane, pd.and_then(|p| p.tmux_target.clone()))
+    }).collect();
     drop(state);
 
-    // PTY data + health checks
+    // Tmux-first health checks (PTY fallback)
     let mut alerts = Vec::new();
-    let pty = app.pty_lock();
     let mut pty_count = 0;
+
     for ps in panes.iter_mut() {
-        ps.pty_running = pty.is_running(ps.pane);
-        ps.line_count = pty.line_count(ps.pane);
-        if ps.pty_running {
-            pty_count += 1;
-        }
-        // Health check for active panes
-        if ps.status == "active" && pty.has_agent(ps.pane) {
-            let h = pty.check_health(ps.pane, &markers);
-            if let Some(ref err) = h.error {
-                ps.health = "error".to_string();
-                alerts.push((ps.pane, err.clone()));
-            } else if h.done {
-                ps.health = "done".to_string();
-            } else {
-                ps.health = "ok".to_string();
+        let tmux_target = tmux_targets.iter()
+            .find(|(p, _)| *p == ps.pane)
+            .and_then(|(_, t)| t.clone());
+
+        if let Some(ref target) = tmux_target {
+            // Tmux-based health check
+            if crate::tmux::pane_exists(target) {
+                ps.pty_running = true;
+                pty_count += 1;
+                let output = crate::tmux::capture_output(target);
+                ps.line_count = output.lines().count();
+
+                if ps.status == "active" {
+                    if crate::tmux::check_done(target) {
+                        ps.health = "done".to_string();
+                    } else if let Some(err) = crate::tmux::check_error(target) {
+                        ps.health = "error".to_string();
+                        alerts.push((ps.pane, err));
+                    } else {
+                        ps.health = "ok".to_string();
+                    }
+                }
+            }
+        } else {
+            // PTY fallback for non-tmux panes
+            let pty = app.pty_lock();
+            ps.pty_running = pty.is_running(ps.pane);
+            ps.line_count = pty.line_count(ps.pane);
+            if ps.pty_running { pty_count += 1; }
+            if ps.status == "active" && pty.has_agent(ps.pane) {
+                let h = pty.check_health(ps.pane, &markers);
+                if let Some(ref err) = h.error {
+                    ps.health = "error".to_string();
+                    alerts.push((ps.pane, err.clone()));
+                } else if h.done {
+                    ps.health = "done".to_string();
+                } else {
+                    ps.health = "ok".to_string();
+                }
             }
         }
     }
 
-    let selected_output = pty.last_output(selected, 40).unwrap_or_default();
-    let selected_screen = pty.screen_text(selected).unwrap_or_default();
-    drop(pty);
+    // Get selected pane output (tmux-first)
+    let selected_tmux = tmux_targets.iter()
+        .find(|(p, _)| *p == selected)
+        .and_then(|(_, t)| t.clone());
+    let (selected_output, selected_screen) = if let Some(ref target) = selected_tmux {
+        let output = crate::tmux::capture_output(target);
+        let lines: Vec<&str> = output.lines().collect();
+        let tail: String = lines.iter().rev().take(40).rev().copied().collect::<Vec<&str>>().join("\n");
+        (tail.clone(), output)
+    } else {
+        let pty = app.pty_lock();
+        let out = pty.last_output(selected, 40).unwrap_or_default();
+        let screen = pty.screen_text(selected).unwrap_or_default();
+        (out, screen)
+    };
 
     let cap = capacity::load_capacity();
 
@@ -842,7 +884,7 @@ fn collect_audit() -> AuditSnapshot {
 
 fn collect_pipelines(app: &App) -> Vec<PipelineSnapshot> {
     use crate::factory;
-    let pty = app.pty_lock();
+    let state = app.state.blocking_read();
     let pane_sigs = crate::multi_agent::signal_by_pane();
     factory::list_pipelines().into_iter().map(|p| {
         let gate_passed = factory::get_gate_result(&p.id).map(|g| g.passed);
@@ -861,7 +903,20 @@ fn collect_pipelines(app: &App) -> Vec<PipelineSnapshot> {
             paused,
             stages: p.stages.into_iter().map(|s| {
                 let snippet = if s.status == "running" {
-                    s.pane.and_then(|pn| pty.last_output(pn, 2))
+                    s.pane.and_then(|pn| {
+                        // Tmux-first: get output from tmux target
+                        let pd = state.panes.get(&pn.to_string());
+                        if let Some(target) = pd.and_then(|p| p.tmux_target.as_deref()) {
+                            let output = crate::tmux::capture_output(target);
+                            let lines: Vec<&str> = output.lines().collect();
+                            let tail: String = lines.iter().rev().take(2).rev().copied().collect::<Vec<&str>>().join("\n");
+                            if tail.is_empty() { None } else { Some(tail) }
+                        } else {
+                            // PTY fallback
+                            let pty = app.pty_lock();
+                            pty.last_output(pn, 2)
+                        }
+                    })
                 } else {
                     None
                 };

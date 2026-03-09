@@ -186,10 +186,16 @@ pub async fn dispatch_mcp_tool(app: &App, tool: &str, args: Value) -> String {
             // Push to all active panes for real-time delivery
             let formatted = format!("[BROADCAST from {}]: {}", r.from_pane, r.message);
             {
-                let mut pty = app.pty_lock();
+                let state = app.state.blocking_read();
                 for i in 1..=crate::config::pane_count() {
-                    if pty.is_running(i) {
-                        let _ = pty.send_line(i, &formatted);
+                    let pd = state.panes.get(&i.to_string());
+                    if let Some(target) = pd.and_then(|p| p.tmux_target.as_deref()) {
+                        let _ = crate::tmux::send_command(target, &formatted);
+                    } else {
+                        let mut pty = app.pty_lock();
+                        if pty.is_running(i) {
+                            let _ = pty.send_line(i, &formatted);
+                        }
                     }
                 }
             }
@@ -198,11 +204,19 @@ pub async fn dispatch_mcp_tool(app: &App, tool: &str, args: Value) -> String {
         "msg_send" => {
             let r = deser!(args, MsgSendRequest);
             let result = crate::multi_agent::msg_send(&r.from_pane, &r.to_pane, &r.message);
-            // Push to target agent's PTY for real-time delivery
+            // Push to target agent via tmux (PTY fallback)
             if let Ok(pane_num) = r.to_pane.parse::<u8>() {
                 let formatted = format!("[MSG from {}]: {}", r.from_pane, r.message);
-                let mut pty = app.pty_lock();
-                let _ = pty.send_line(pane_num, &formatted);
+                let state = app.state.blocking_read();
+                let tmux_target = state.panes.get(&pane_num.to_string())
+                    .and_then(|p| p.tmux_target.clone());
+                drop(state);
+                if let Some(target) = tmux_target {
+                    let _ = crate::tmux::send_command(&target, &formatted);
+                } else {
+                    let mut pty = app.pty_lock();
+                    let _ = pty.send_line(pane_num, &formatted);
+                }
             }
             result.to_string()
         }
