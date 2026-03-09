@@ -313,6 +313,22 @@ select:hover{border-color:var(--border-bright)}
 .burndown-wrap{margin-bottom:16px}
 canvas{width:100%;display:block}
 
+/* === Stat Tiles (for digest/overview) === */
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px}
+.stat-tile{
+  background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-sm);
+  padding:8px 10px;text-align:center;
+}
+.stat-tile .val{font-size:18px;font-weight:800;font-feature-settings:'tnum'}
+.stat-tile .label{font-size:8px;color:var(--dim);text-transform:uppercase;letter-spacing:.4px;margin-top:2px}
+.port-row{
+  display:flex;gap:6px;align-items:center;padding:4px 0;
+  border-bottom:1px solid rgba(30,42,58,.3);font-size:10px;
+}
+.port-num{font-family:var(--mono);color:var(--blue);font-weight:700;min-width:40px}
+.port-svc{color:var(--text);font-weight:500}
+.port-pane{color:var(--dim);margin-left:auto;font-size:9px}
+
 /* === No Data === */
 .no-data{color:var(--dim);font-size:11px;text-align:center;padding:20px}
 
@@ -398,6 +414,30 @@ canvas{width:100%;display:block}
       </div>
     </div>
 
+    <!-- Analytics Row: Digest + Overview -->
+    <div class="content-grid" id="analytics-section">
+      <div class="card">
+        <h3>24h Digest</h3>
+        <div id="digest"></div>
+      </div>
+      <div class="card">
+        <h3>System Overview</h3>
+        <div id="overview"></div>
+      </div>
+    </div>
+
+    <!-- Ports + MCP Routing -->
+    <div class="content-grid" id="infra-section">
+      <div class="card">
+        <h3>Allocated Ports</h3>
+        <div id="ports"></div>
+      </div>
+      <div class="card">
+        <h3>Quality Gate</h3>
+        <div id="quality-gate"></div>
+      </div>
+    </div>
+
     <div id="sprint-section"></div>
     <div class="burndown-wrap" id="burndown-section" style="display:none">
       <div class="card"><h3>Sprint Burndown</h3><canvas id="burndown-chart" width="700" height="140"></canvas></div>
@@ -437,9 +477,10 @@ let wsState=null;
 let paneOutputs={};
 let activePaneNum=null;
 
-// === Theme colors per pane ===
+// === Theme colors per pane (fallback; overridden by API theme_color) ===
 const COLORS=['#4da6ff','#44d98c','#b07aff','#ff9f43','#ff6b9d','#f0c040','#c0c8d4','#3dd6d0','#ff5c5c'];
-function paneColor(n){return COLORS[(n-1)%COLORS.length]}
+let apiPaneColors={};
+function paneColor(n){return apiPaneColors[n]||COLORS[(n-1)%COLORS.length]}
 
 // === Helpers ===
 async function fetchJSON(url){try{const r=await fetch(API+url);if(!r.ok)return null;return await r.json();}catch{return null;}}
@@ -461,10 +502,41 @@ async function loadSpaces(){
   currentSpace=spaces[0];sel.value=currentSpace;
 }
 
-// === Monitor ===
+// === Monitor + Status + Alerts ===
 let monitorData=null;
+let statusData=null;
+let alertsData=null;
 async function loadMonitor(){
-  monitorData=await fetchJSON('/api/monitor');
+  [monitorData, statusData, alertsData] = await Promise.all([
+    fetchJSON('/api/monitor'),
+    fetchJSON('/api/status'),
+    fetchJSON('/api/analytics/alerts'),
+  ]);
+  // Extract API-provided theme colors
+  if(statusData&&statusData.panes){
+    for(const p of statusData.panes){
+      if(p.theme_color)apiPaneColors[p.pane]=p.theme_color;
+    }
+  }
+  // Render alerts bar
+  renderAlerts();
+}
+
+function renderAlerts(){
+  const el=document.getElementById('alerts');
+  if(!alertsData||!alertsData.alerts||!alertsData.alerts.length){
+    if(monitorData&&monitorData.alerts&&monitorData.alerts.length){
+      el.innerHTML=monitorData.alerts.map(a=>{
+        const cls=a.severity==='error'?'alert-error':a.severity==='warning'?'alert-warning':'alert-info';
+        return `<div class="alert-item ${cls}">${escHtml(a.message||a.text||JSON.stringify(a))}</div>`;
+      }).join('');
+    } else { el.innerHTML=''; }
+    return;
+  }
+  el.innerHTML=alertsData.alerts.map(a=>{
+    const cls=a.severity==='error'?'alert-error':a.severity==='warning'?'alert-warning':'alert-info';
+    return `<div class="alert-item ${cls}">${escHtml(a.message||a.text||a.alert||'Alert')}</div>`;
+  }).join('');
 }
 
 // === Gauges ===
@@ -474,33 +546,41 @@ async function renderGauges(){
   const q=monitorData?monitorData.queue:{pending:0,running:0};
   const total=sm.total||9;const active=sm.active||0;
   const acuPct=d?Math.min(d.acu_pct,100):0;
+  const revPct=d?Math.min(d.reviews_pct||0,100):0;
+  const wsOk=ws&&ws.readyState===1;
+  const bottleneck=d?d.bottleneck:'--';
+  const bnColor=bottleneck==='review'?'var(--red)':bottleneck==='compute'?'var(--yellow)':'var(--green)';
   document.getElementById('gauges').innerHTML=`
     <div class="gauge g-blue"><div class="gauge-label">Agents</div>
       <div class="gauge-value">${active}<small> / ${total}</small></div>
-      <div class="gauge-sub">${sm.errors?'<span style="color:var(--red)">'+sm.errors+' errors</span> &middot; ':''} ${sm.done||0} done</div>
+      <div class="gauge-sub">${sm.errors?'<span style="color:var(--red)">'+sm.errors+' err</span> · ':''}${sm.done||0} done · ${sm.stuck||0} stuck</div>
       <div class="gauge-bar"><div class="gauge-fill" style="width:${active/total*100}%;background:var(--blue)"></div></div></div>
     <div class="gauge g-green"><div class="gauge-label">Queue</div>
       <div class="gauge-value">${q.pending||0}<small> pending</small></div>
-      <div class="gauge-sub">${q.running||0} running &middot; ${q.done||0} done</div>
+      <div class="gauge-sub">${q.running||0} running · ${q.done||0} done · ${q.failed||0} fail</div>
       <div class="gauge-bar"><div class="gauge-fill" style="width:${Math.min((q.running||0)/Math.max(total,1)*100,100)}%;background:var(--green)"></div></div></div>
     <div class="gauge g-purple"><div class="gauge-label">ACU Today</div>
       <div class="gauge-value">${d?d.acu_used:0}<small> / ${d?d.acu_total:'?'}</small></div>
-      <div class="gauge-sub">${acuPct.toFixed(0)}% capacity</div>
+      <div class="gauge-sub">${acuPct.toFixed(0)}% · bottleneck: <span style="color:${bnColor}">${bottleneck}</span></div>
       <div class="gauge-bar"><div class="gauge-fill" style="width:${acuPct}%;background:var(--purple)"></div></div></div>
-    <div class="gauge g-yellow"><div class="gauge-label">WebSocket</div>
-      <div class="gauge-value" style="color:${ws&&ws.readyState===1?'var(--green)':'var(--dim)'}">${ws&&ws.readyState===1?'LIVE':'--'}</div>
-      <div class="gauge-sub">Real-time terminal diffs</div>
-      <div class="gauge-bar"><div class="gauge-fill" style="width:${ws&&ws.readyState===1?100:0}%;background:var(--yellow)"></div></div></div>`;
+    <div class="gauge g-yellow"><div class="gauge-label">Reviews ${wsOk?'· <span style="color:var(--green)">WS LIVE</span>':''}</div>
+      <div class="gauge-value">${d?d.reviews_used:0}<small> / ${d?d.reviews_total:'?'}</small></div>
+      <div class="gauge-sub">${revPct}% review bandwidth</div>
+      <div class="gauge-bar"><div class="gauge-fill" style="width:${revPct}%;background:var(--yellow)"></div></div></div>`;
 }
 
 // === Pane Grid ===
+function getStatusPane(paneNum){
+  return statusData&&statusData.panes?statusData.panes.find(p=>p.pane===paneNum):null;
+}
 function renderPanes(){
   const src=wsState?wsState.panes:(monitorData?monitorData.panes:null);
   if(!src)return;
   const el=document.getElementById('panes');
   let activeCount=0;let html='';
   for(const p of src){
-    const isActive=p.status==='active';
+    const sp=getStatusPane(p.pane); // extra fields from /api/status
+    const isActive=p.status==='active'||(sp&&sp.running);
     const hasProject=p.project&&p.project!=='--';
     const color=paneColor(p.pane);
     const preview=paneOutputs[p.pane];
@@ -508,12 +588,19 @@ function renderPanes(){
     if(isActive)activeCount++;
     const h=p.health||p.status||'idle';
     const sc=h==='active'||isActive?'s-active':h==='done'?'s-done':h==='error'?'s-error':h==='stuck'?'s-stuck':'s-idle';
-    let cls=isActive?'active':'idle';
+    let cls=isActive?'active':hasProject?'':'idle';
     if(h==='error')cls+=' has-error';
     if(h==='done')cls+=' is-done';
     if(activePaneNum===p.pane)cls+=' selected';
 
-    if(!isActive&&!hasProject){
+    // Compute runtime from started_at
+    let runtime='';
+    if(sp&&sp.started_at){
+      const mins=Math.round((Date.now()-new Date(sp.started_at).getTime())/60000);
+      if(mins>0)runtime=fmtMins(mins);
+    }
+
+    if(!hasProject){
       html+=`<div class="pane-card idle" style="--pane-color:${color};border-left-color:${color};background:linear-gradient(135deg,${color}08 0%,var(--surface) 60%);border-color:${color}20" onclick="openPanel(${p.pane})">
         <div class="pane-top" style="margin-bottom:0">
           <span class="pane-num" style="background:${color}">${p.pane}</span>
@@ -525,15 +612,17 @@ function renderPanes(){
           <span class="pane-num" style="background:${color}">${p.pane}</span>
           <span class="pane-status ${sc}">${h}</span>
         </div>
-        <div class="pane-project">${p.project||'--'}</div>
+        <div class="pane-project">${p.project||'--'}${sp&&sp.branch?' <span style="color:var(--dim);font-size:9px">⌥ '+sp.branch+'</span>':''}</div>
         <div class="pane-task">${(p.task||'').slice(0,60)}</div>
         <div class="pane-meta">
           ${p.role&&p.role!=='--'?`<span class="badge b-role">${p.role}</span>`:''}
           <span class="badge b-lines" id="pane-lines-${p.pane}">${p.line_count||p.lines||0}L</span>
-          ${p.runtime_mins?`<span class="badge b-runtime">${fmtMins(p.runtime_mins)}</span>`:''}
+          ${runtime?`<span class="badge b-runtime">${runtime}</span>`:''}
+          ${sp&&sp.acu?`<span class="badge" style="background:rgba(176,122,255,.1);color:var(--purple)">${sp.acu} ACU</span>`:''}
           ${isActive?'<span class="badge b-live">LIVE</span>':''}
           ${h==='error'?'<span class="badge b-err">ERR</span>':''}
           ${h==='done'?'<span class="badge b-done">DONE</span>':''}
+          ${sp&&sp.workspace?'<span class="badge" style="background:rgba(61,214,208,.1);color:var(--teal)">WT</span>':''}
         </div>
         ${previewLines?`<div class="pane-preview">${escHtml(previewLines)}</div>`:''}
       </div>`;
@@ -559,10 +648,22 @@ function openPanel(paneNum){
   document.getElementById('panel-title').innerHTML=
     `<span class="pane-num" style="background:${color}">${paneNum}</span> ${p&&p.project!=='--'?p.project:'idle'}`;
 
+  const sp=getStatusPane(paneNum);
+  let startedStr='--';
+  if(sp&&sp.started_at){
+    const d=new Date(sp.started_at);
+    startedStr=d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  }
   document.getElementById('panel-meta').innerHTML=`
     <div><dt>Status</dt><dd>${p?p.status:'idle'}</dd></div>
-    <div><dt>Role</dt><dd>${p&&p.role!=='--'?p.role:'--'}</dd></div>
-    <div><dt>Task</dt><dd style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p?p.task||'--':'--'}</dd></div>`;
+    <div><dt>Role</dt><dd>${sp?sp.role_full||(p&&p.role!=='--'?p.role:'--'):'--'}</dd></div>
+    <div><dt>Started</dt><dd>${startedStr}</dd></div>
+    <div><dt>Branch</dt><dd>${sp&&sp.branch?sp.branch:'--'}</dd></div>
+    <div><dt>Workspace</dt><dd>${sp&&sp.workspace?'isolated':'shared'}</dd></div>
+    <div><dt>ACU</dt><dd>${sp?sp.acu||0:0}</dd></div>
+    <div><dt>Space</dt><dd>${sp&&sp.space?sp.space:'--'}</dd></div>
+    <div><dt>Issue</dt><dd>${sp&&sp.issue_id?sp.issue_id:'--'}</dd></div>
+    <div style="grid-column:1/-1"><dt>Task</dt><dd style="max-width:380px;white-space:normal;font-size:10px">${p?p.task||'--':'--'}</dd></div>`;
 
   document.getElementById('panel-actions').innerHTML=`
     <button class="btn btn-red" onclick="wsSend({cmd:'kill',pane:'${paneNum}',reason:'web dashboard'})">Kill</button>
@@ -824,13 +925,71 @@ function palKey(e){
 }
 function runCmd(i){COMMANDS[i].action();closePalette();}
 
+// === Analytics: 24h Digest ===
+async function renderDigest(){
+  const d=await fetchJSON('/api/analytics/digest');
+  const el=document.getElementById('digest');
+  if(!d){el.innerHTML='<div class="no-data">No data</div>';return;}
+  el.innerHTML=`<div class="stat-grid">
+    <div class="stat-tile"><div class="val" style="color:var(--green)">${d.tasks_completed||0}</div><div class="label">Tasks Done</div></div>
+    <div class="stat-tile"><div class="val" style="color:var(--blue)">${d.tool_calls||0}</div><div class="label">Tool Calls</div></div>
+    <div class="stat-tile"><div class="val" style="color:var(--purple)">${d.commits||0}</div><div class="label">Commits</div></div>
+    <div class="stat-tile"><div class="val" style="color:var(--teal)">${d.files_touched||0}</div><div class="label">Files</div></div>
+    <div class="stat-tile"><div class="val" style="color:${d.errors>0?'var(--red)':'var(--dim)'}">${d.errors||0}</div><div class="label">Errors</div></div>
+    <div class="stat-tile"><div class="val" style="color:var(--orange)">${d.knowledge_added||0}</div><div class="label">KB Added</div></div>
+    <div class="stat-tile"><div class="val" style="color:var(--blue)">${d.agents_active||0}</div><div class="label">Agents Active</div></div>
+    <div class="stat-tile"><div class="val" style="color:${parseFloat(d.error_rate||0)>10?'var(--red)':'var(--green)'}">${parseFloat(d.error_rate||0).toFixed(1)}%</div><div class="label">Error Rate</div></div>
+  </div>`;
+}
+
+// === Analytics: System Overview ===
+async function renderOverview(){
+  const d=await fetchJSON('/api/analytics/overview');
+  const el=document.getElementById('overview');
+  if(!d){el.innerHTML='<div class="no-data">No data</div>';return;}
+  const recent=d.recent||{};
+  el.innerHTML=`<div class="stat-grid">
+    <div class="stat-tile"><div class="val" style="color:var(--blue)">${d.agent_count||0}</div><div class="label">Agents</div></div>
+    <div class="stat-tile"><div class="val" style="color:var(--purple)">${d.active_locks||0}</div><div class="label">File Locks</div></div>
+    <div class="stat-tile"><div class="val" style="color:var(--green)">${d.pending_tasks||0}</div><div class="label">Pending Tasks</div></div>
+    <div class="stat-tile"><div class="val" style="color:var(--teal)">${(d.ports||[]).length}</div><div class="label">Ports</div></div>
+    <div class="stat-tile"><div class="val" style="color:var(--orange)">${recent.tool_calls_1h||0}</div><div class="label">Tools/1h</div></div>
+    <div class="stat-tile"><div class="val" style="color:${(recent.errors_1h||0)>0?'var(--red)':'var(--green)'}">${recent.errors_1h||0}</div><div class="label">Errors/1h</div></div>
+  </div>`;
+}
+
+// === Ports + Quality ===
+async function renderInfra(){
+  const ov=await fetchJSON('/api/analytics/overview');
+  // Ports
+  const portsEl=document.getElementById('ports');
+  const ports=ov&&ov.ports?ov.ports:[];
+  if(!ports.length){portsEl.innerHTML='<div class="no-data">No ports allocated</div>';}
+  else{
+    portsEl.innerHTML=ports.map(p=>`<div class="port-row">
+      <span class="port-num">:${p.port}</span>
+      <span class="port-svc">${p.service||'--'}</span>
+      <span class="port-pane">${p.pane_id||''}</span>
+    </div>`).join('');
+  }
+  // Quality
+  const qEl=document.getElementById('quality-gate');
+  const q=ov&&ov.quality?ov.quality:{};
+  const lastBuild=q.last_build;
+  const lastTest=q.last_test;
+  qEl.innerHTML=`<div class="stat-grid">
+    <div class="stat-tile"><div class="val" style="color:${lastBuild?'var(--green)':'var(--dim)'}">${lastBuild?'PASS':'--'}</div><div class="label">Last Build</div></div>
+    <div class="stat-tile"><div class="val" style="color:${lastTest?'var(--green)':'var(--dim)'}">${lastTest?'PASS':'--'}</div><div class="label">Last Test</div></div>
+  </div>`;
+}
+
 // === Refresh ===
 async function refresh(){
   currentSpace=document.getElementById('space-select').value;
   await loadMonitor();
   renderPanes();
   renderLogs();
-  await Promise.all([renderGauges(),renderRoles(),renderQueue(),renderBoard(),renderSprint()]);
+  await Promise.all([renderGauges(),renderRoles(),renderQueue(),renderBoard(),renderSprint(),renderDigest(),renderOverview(),renderInfra()]);
 }
 
 async function init(){
