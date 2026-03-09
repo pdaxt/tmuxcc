@@ -114,6 +114,15 @@ pub enum TuiCommand {
         pane: u8,
         message: String,
     },
+    AddScreen {
+        name: Option<String>,
+        layout: Option<String>,
+        panes: Option<u8>,
+    },
+    RemoveScreen {
+        screen_ref: String,
+        force: bool,
+    },
 }
 
 pub struct TuiResult {
@@ -321,6 +330,18 @@ async fn execute_command(app: &App, cmd: TuiCommand) -> TuiResult {
                     message: format!("Failed to send to pane {}: {}", pane, e),
                 },
             }
+        }
+        TuiCommand::AddScreen { name, layout, panes } => {
+            let desc = format!("Add screen{}", name.as_deref().map(|n| format!(" '{}'", n)).unwrap_or_default());
+            let result = tools::screen_tools::add_screen(app, name, layout, panes);
+            let success = !result.contains("\"error\"");
+            TuiResult { description: desc, success, message: result }
+        }
+        TuiCommand::RemoveScreen { screen_ref, force } => {
+            let desc = format!("Remove screen '{}'", screen_ref);
+            let result = tools::screen_tools::remove_screen(app, screen_ref, force);
+            let success = !result.contains("\"error\"");
+            TuiResult { description: desc, success, message: result }
         }
     }
 }
@@ -553,6 +574,14 @@ fn handle_navigate(
         }
         KeyCode::Char('y') => {
             *view_mode = if *view_mode == ViewMode::Pipeline { ViewMode::Normal } else { ViewMode::Pipeline };
+        }
+
+        // Screen management
+        KeyCode::Char('+') | KeyCode::Char('=') => {
+            *mode = TuiMode::Input { form: input::create_add_screen_form() };
+        }
+        KeyCode::Char('-') => {
+            *mode = TuiMode::Input { form: input::create_remove_screen_form() };
         }
 
         // Pane selection

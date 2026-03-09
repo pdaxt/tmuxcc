@@ -26,6 +26,8 @@ pub enum FormKind {
     FeatureCreate,
     Orchestrate,
     FactoryGo,
+    AddScreen,
+    RemoveScreen,
 }
 
 /// Create a spawn form pre-filled with selected pane
@@ -163,6 +165,56 @@ pub fn create_orchestrate_form() -> FormState {
     }
 }
 
+/// Create an add-screen form
+pub fn create_add_screen_form() -> FormState {
+    FormState {
+        title: "Add Screen".into(),
+        fields: vec![
+            FormField {
+                label: "Name".into(),
+                value: String::new(),
+                cursor: 0,
+                required: false,
+                placeholder: "screen name (auto-generated if empty)".into(),
+            },
+            FormField {
+                label: "Layout".into(),
+                value: "grid2x2".into(),
+                cursor: 6,
+                required: false,
+                placeholder: "single/split2/horizontal/vertical/grid2x2".into(),
+            },
+            FormField {
+                label: "Panes".into(),
+                value: "4".into(),
+                cursor: 1,
+                required: false,
+                placeholder: "number of panes (1-6)".into(),
+            },
+        ],
+        focused: 0,
+        kind: FormKind::AddScreen,
+    }
+}
+
+/// Create a remove-screen form
+pub fn create_remove_screen_form() -> FormState {
+    FormState {
+        title: "Remove Screen".into(),
+        fields: vec![
+            FormField {
+                label: "Screen".into(),
+                value: String::new(),
+                cursor: 0,
+                required: true,
+                placeholder: "screen ID or name".into(),
+            },
+        ],
+        focused: 0,
+        kind: FormKind::RemoveScreen,
+    }
+}
+
 /// Check if all required fields have values
 pub fn form_is_valid(form: &FormState) -> bool {
     form.fields.iter().all(|f| !f.required || !f.value.trim().is_empty())
@@ -201,6 +253,16 @@ pub fn form_to_command(form: &FormState) -> Option<TuiCommand> {
             let request = form.fields[1].value.trim().to_string();
             let template = non_empty(&form.fields[2].value);
             Some(TuiCommand::FactoryGo { project, request, template })
+        }
+        FormKind::AddScreen => {
+            let name = non_empty(&form.fields[0].value);
+            let layout = non_empty(&form.fields[1].value);
+            let panes = form.fields[2].value.trim().parse::<u8>().ok();
+            Some(TuiCommand::AddScreen { name, layout, panes })
+        }
+        FormKind::RemoveScreen => {
+            let screen_ref = form.fields[0].value.trim().to_string();
+            Some(TuiCommand::RemoveScreen { screen_ref, force: false })
         }
     }
 }
@@ -364,6 +426,15 @@ pub fn parse_command(input: &str) -> Option<TuiCommand> {
                 request: description,
                 template,
             });
+        }
+        // :screen add [name] — add a new screen
+        Some("screen") if parts.len() >= 2 && parts[1] == "add" => {
+            let name = if parts.len() >= 3 { Some(parts[2].to_string()) } else { None };
+            return Some(TuiCommand::AddScreen { name, layout: None, panes: None });
+        }
+        // :screen rm <name> — remove a screen
+        Some("screen") if parts.len() >= 3 && (parts[1] == "rm" || parts[1] == "remove") => {
+            return Some(TuiCommand::RemoveScreen { screen_ref: parts[2].to_string(), force: false });
         }
         Some("qf") if parts.len() >= 3 => {
             let ids: Vec<String> = parts[2].split(',').map(|s| s.trim().to_string()).collect();

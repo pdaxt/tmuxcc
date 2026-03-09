@@ -203,6 +203,8 @@ pub struct DashboardData {
     pub pipelines: Vec<PipelineSnapshot>,
     pub signal_count: usize,
     pub pane_signals: std::collections::HashMap<u8, Vec<(String, String)>>,
+    pub screen_count: usize,
+    pub screen_names: Vec<String>,
 }
 
 /// Collect all data in one pass (lock once, release)
@@ -419,6 +421,14 @@ pub fn collect_data(app: &App, selected: u8, view_mode: ViewMode, feature_cursor
         pipelines,
         signal_count: crate::multi_agent::signal_count_unack(),
         pane_signals: crate::multi_agent::signal_by_pane(),
+        screen_count: {
+            let mgr = app.screens.read().unwrap();
+            mgr.list_screens().len()
+        },
+        screen_names: {
+            let mgr = app.screens.read().unwrap();
+            mgr.list_screens().iter().map(|s| s.name.clone()).collect()
+        },
     }
 }
 
@@ -1245,6 +1255,11 @@ fn render_header(f: &mut Frame, area: Rect, data: &DashboardData) {
         } else {
             Span::raw("")
         },
+        Span::styled(" │ Screens ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            format!("{}", data.screen_count),
+            Style::default().fg(Color::Cyan),
+        ),
     ]);
 
     let block = Block::default()
@@ -2220,6 +2235,10 @@ fn render_help_bar(f: &mut Frame, area: Rect, data: &DashboardData) {
             Span::styled("[y]", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
             Span::styled("pipe ", Style::default().fg(Color::DarkGray)),
             Span::styled("│ ", Style::default().fg(Color::DarkGray)),
+            Span::styled("[+]", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled("scr ", Style::default().fg(Color::DarkGray)),
+            Span::styled("[-]", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled("rm ", Style::default().fg(Color::DarkGray)),
             Span::styled("[1-9]", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
             Span::styled(" ", Style::default().fg(Color::DarkGray)),
             Span::styled("[Tab]", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),

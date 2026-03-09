@@ -81,7 +81,21 @@ async fn main() -> anyhow::Result<()> {
             run_mcp_mode(application, port, no_web).await?;
         }
         None => {
-            run_mcp_mode(application, cfg.web_port, false).await?;
+            // Default: launch TUI dashboard with MCP + web running in background
+            let web_app = Arc::clone(&application);
+            let web_port = cfg.web_port;
+            tokio::spawn(async move {
+                if let Err(e) = web::run_web_server(web_app, web_port).await {
+                    eprintln!("Web server error: {}", e);
+                }
+            });
+            engine::start_background_tasks().await;
+
+            let tui_app = application;
+            let handle = std::thread::spawn(move || {
+                tui::run_tui(tui_app)
+            });
+            handle.join().map_err(|_| anyhow::anyhow!("TUI thread panicked"))??;
         }
         Some(Commands::Tui) => {
             // TUI uses blocking_read() which panics inside tokio runtime.
