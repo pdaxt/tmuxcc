@@ -2,8 +2,8 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 // Re-use the actual crate types
-use agentos::tui::input;
-use agentos::tui::{TuiCommand, TuiResult, TuiMode, PendingAction, ViewMode};
+use dx_terminal::tui::input;
+use dx_terminal::tui::{TuiCommand, TuiResult, TuiMode, PendingAction, ViewMode};
 
 // ========== Command Parsing ==========
 

@@ -291,7 +291,7 @@ fn test_board_summary() {
 // Test pipeline_id serialization roundtrip (no env vars needed)
 #[test]
 fn test_pipeline_id_serialization() {
-    use agentos::queue::QueueTask;
+    use dx_terminal::queue::QueueTask;
 
     // Construct a QueueTask with pipeline_id set
     let task_json = r#"{
@@ -338,7 +338,7 @@ fn test_pipeline_id_serialization() {
 // Test that missing pipeline_id defaults to None (backwards compat)
 #[test]
 fn test_pipeline_id_backwards_compat() {
-    use agentos::queue::QueueTask;
+    use dx_terminal::queue::QueueTask;
 
     let old_json = r#"{
         "id": "t_old_456",
@@ -370,7 +370,7 @@ fn test_pipeline_id_backwards_compat() {
 // Test full queue roundtrip with pipeline_id (no filesystem)
 #[test]
 fn test_queue_roundtrip_with_pipeline_id() {
-    use agentos::queue::{QueueTask, TaskQueue};
+    use dx_terminal::queue::{QueueTask, TaskQueue};
 
     let queue = TaskQueue {
         tasks: vec![
