@@ -271,6 +271,21 @@ select:hover{border-color:var(--border-bright)}
 .btn-red{background:rgba(255,92,92,.15);color:var(--red)}.btn-red:hover{background:rgba(255,92,92,.25)}
 .btn-blue{background:rgba(77,166,255,.15);color:var(--blue)}.btn-blue:hover{background:rgba(77,166,255,.25)}
 .btn-green{background:rgba(68,217,140,.15);color:var(--green)}.btn-green:hover{background:rgba(68,217,140,.25)}
+.terminal-wrap{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.chat-log{overflow-y:auto;padding:8px 14px;max-height:40%;border-bottom:1px solid var(--border)}
+.chat-log:empty{display:none}
+.chat-log::-webkit-scrollbar{width:5px}
+.chat-log::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+.chat-msg{display:flex;gap:8px;margin-bottom:8px;animation:slideIn .2s ease}
+.chat-msg.user{justify-content:flex-end}
+.chat-msg .chat-bubble{max-width:85%;padding:6px 10px;border-radius:8px;font-size:11px;font-family:var(--mono);line-height:1.5;word-break:break-word}
+.chat-msg.user .chat-bubble{background:rgba(77,166,255,.15);color:var(--blue);border-bottom-right-radius:2px}
+.chat-msg.system .chat-bubble{background:rgba(68,217,140,.1);color:var(--green);border-bottom-left-radius:2px;font-size:10px}
+.chat-msg.error .chat-bubble{background:rgba(255,92,92,.1);color:var(--red)}
+.chat-msg .chat-ts{font-size:8px;color:var(--dim);align-self:flex-end;flex-shrink:0}
+.chat-quick{display:flex;gap:4px;padding:4px 14px;border-bottom:1px solid var(--border);background:var(--surface2);flex-wrap:wrap}
+.chat-quick button{font-size:9px;padding:2px 8px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--muted);cursor:pointer;font-family:var(--mono);transition:var(--transition)}
+.chat-quick button:hover{border-color:var(--blue);color:var(--blue);background:rgba(77,166,255,.08)}
 .terminal{
   flex:1;overflow-y:auto;padding:12px 14px;
   font-family:var(--mono);font-size:11px;line-height:1.6;
@@ -291,6 +306,8 @@ select:hover{border-color:var(--border-bright)}
 }
 .talk-input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 2px rgba(77,166,255,.15)}
 .talk-input::placeholder{color:var(--dim)}
+.talk-bar .send-indicator{font-size:9px;color:var(--dim);align-self:center;display:none}
+.talk-bar .send-indicator.active{display:block;color:var(--green)}
 
 /* === Queue Add Form === */
 .add-form{
@@ -452,9 +469,20 @@ canvas{width:100%;display:block}
     </div>
     <div class="panel-meta" id="panel-meta"></div>
     <div class="panel-actions" id="panel-actions"></div>
-    <div class="terminal" id="panel-terminal"></div>
+    <div class="terminal-wrap">
+      <div class="chat-log" id="chat-log"></div>
+      <div class="chat-quick" id="chat-quick">
+        <button onclick="quickTalk('continue')">continue</button>
+        <button onclick="quickTalk('status')">status</button>
+        <button onclick="quickTalk('yes')">yes</button>
+        <button onclick="quickTalk('no')">no</button>
+        <button onclick="quickTalk('/compact')">compact</button>
+      </div>
+      <div class="terminal" id="panel-terminal"></div>
+    </div>
     <div class="talk-bar">
-      <input class="talk-input" id="talk-input" placeholder="Send message to agent..." onkeydown="if(event.key==='Enter')sendTalk()">
+      <input class="talk-input" id="talk-input" placeholder="Send message to agent..." onkeydown="talkKeydown(event)">
+      <span class="send-indicator" id="send-indicator">sending...</span>
       <button class="btn btn-green" onclick="sendTalk()">Send</button>
     </div>
   </div>
@@ -674,6 +702,12 @@ function openPanel(paneNum){
   term.textContent=output;
   term.scrollTop=term.scrollHeight;
 
+  // Render chat history for this pane
+  renderChatLog(paneNum);
+
+  // Focus the talk input
+  setTimeout(()=>{const inp=document.getElementById('talk-input');if(inp)inp.focus()},100);
+
   wsSend({cmd:'capture',pane:paneNum});
   renderPanes(); // Update selection highlight
 }
@@ -685,12 +719,75 @@ function closePanel(){
   renderPanes();
 }
 
+let chatHistories={};
+let talkHistory=[];
+let talkHistoryIdx=-1;
+
 function sendTalk(){
   const input=document.getElementById('talk-input');
   const msg=input.value.trim();
   if(!msg||!activePaneNum)return;
+
+  // Add to chat log
+  addChatMsg(activePaneNum,'user',msg);
+
+  // Show sending indicator
+  const ind=document.getElementById('send-indicator');
+  if(ind){ind.classList.add('active');setTimeout(()=>ind.classList.remove('active'),1500)}
+
+  // Send via WebSocket
   wsSend({cmd:'talk',pane:activePaneNum,message:msg});
+
+  // Save to command history for up-arrow recall
+  talkHistory.unshift(msg);
+  if(talkHistory.length>50)talkHistory.pop();
+  talkHistoryIdx=-1;
+
   input.value='';
+  input.focus();
+}
+
+function quickTalk(msg){
+  if(!activePaneNum)return;
+  addChatMsg(activePaneNum,'user',msg);
+  wsSend({cmd:'talk',pane:activePaneNum,message:msg});
+  const ind=document.getElementById('send-indicator');
+  if(ind){ind.classList.add('active');setTimeout(()=>ind.classList.remove('active'),1500)}
+}
+
+function addChatMsg(pane,type,text){
+  if(!chatHistories[pane])chatHistories[pane]=[];
+  const ts=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  chatHistories[pane].push({type,text,ts});
+  if(chatHistories[pane].length>100)chatHistories[pane].shift();
+  if(activePaneNum===pane)renderChatLog(pane);
+}
+
+function renderChatLog(pane){
+  const el=document.getElementById('chat-log');
+  if(!el)return;
+  const msgs=chatHistories[pane]||[];
+  el.innerHTML=msgs.map(m=>`
+    <div class="chat-msg ${m.type}">
+      ${m.type==='user'?`<span class="chat-ts">${m.ts}</span>`:''}
+      <div class="chat-bubble">${escHtml(m.text)}</div>
+      ${m.type!=='user'?`<span class="chat-ts">${m.ts}</span>`:''}
+    </div>`).join('');
+  el.scrollTop=el.scrollHeight;
+}
+
+function talkKeydown(e){
+  if(e.key==='Enter'){sendTalk();return}
+  if(e.key==='ArrowUp'&&talkHistory.length){
+    e.preventDefault();
+    talkHistoryIdx=Math.min(talkHistoryIdx+1,talkHistory.length-1);
+    e.target.value=talkHistory[talkHistoryIdx];
+  }
+  if(e.key==='ArrowDown'){
+    e.preventDefault();
+    talkHistoryIdx=Math.max(talkHistoryIdx-1,-1);
+    e.target.value=talkHistoryIdx>=0?talkHistory[talkHistoryIdx]:'';
+  }
 }
 
 // === Roles ===
@@ -868,6 +965,14 @@ function handleWSMessage(msg){
         if(activePaneNum===pn){
           const term=document.getElementById('panel-terminal');
           if(term){term.textContent=msg.result.output;term.scrollTop=term.scrollHeight;}
+        }
+      }
+      // Talk result feedback
+      if(msg.cmd==='talk'&&msg.result){
+        if(msg.result.error){
+          addChatMsg(msg.result.pane||activePaneNum,'error',msg.result.error);
+        } else if(msg.result.status==='sent'){
+          addChatMsg(msg.result.pane,'system','Message delivered to agent');
         }
       }
       break;
