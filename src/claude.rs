@@ -55,7 +55,7 @@ pub fn write_preamble(pane: u8, content: &str) -> Result<String> {
     Ok(path.to_string_lossy().to_string())
 }
 
-/// Generate a preamble for an agent
+/// Generate a preamble for an agent. Includes workspace context and sibling agent info.
 pub fn generate_preamble(
     pane: u8,
     theme: &str,
@@ -118,9 +118,18 @@ pub fn generate_preamble(
         }
     };
 
+    // Gather sibling agent context
+    let sibling_context = gather_sibling_context(pane, project);
+
     format!(
         "# TASK: {task}\n\
          **Role:** {role_short} | **Project:** {project} | **Pane:** {pane} ({theme})\n\
+         \n\
+         ## Environment\n\
+         - Pane: {pane} ({theme})\n\
+         - Project: {project}\n\
+         - Role: {role} ({role_short})\n\
+         - DX Terminal managed agent — your work is monitored automatically\n\
          \n\
          ## Role Instructions\n\
          You are the {role} agent. Focus on your assigned task.\n\
@@ -130,8 +139,54 @@ pub fn generate_preamble(
          {extra}\
          {handoff}\
          {gate}\
+         {sibling_context}\
          {coord}\n",
     )
+}
+
+/// Gather info about other active agents on the same project
+fn gather_sibling_context(my_pane: u8, project: &str) -> String {
+    // Read state file directly (sync context, no async available)
+    let state_path = config::dx_root().join("state.json");
+    let state_content = std::fs::read_to_string(&state_path).unwrap_or_default();
+    let state: serde_json::Value = serde_json::from_str(&state_content).unwrap_or_default();
+
+    let panes = match state.get("panes").and_then(|p| p.as_object()) {
+        Some(p) => p,
+        None => return String::new(),
+    };
+
+    let mut siblings = Vec::new();
+    for (key, pane_data) in panes {
+        let pane_num: u8 = match key.parse() {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+        if pane_num == my_pane { continue; }
+
+        let status = pane_data.get("status").and_then(|v| v.as_str()).unwrap_or("idle");
+        if status != "active" { continue; }
+
+        let p = pane_data.get("project").and_then(|v| v.as_str()).unwrap_or("");
+        let r = pane_data.get("role").and_then(|v| v.as_str()).unwrap_or("");
+        let t = pane_data.get("task").and_then(|v| v.as_str()).unwrap_or("");
+        let b = pane_data.get("branch_name").and_then(|v| v.as_str()).unwrap_or("");
+        let theme = config::theme_name(pane_num);
+
+        if p.to_lowercase() == project.to_lowercase() {
+            siblings.push(format!("  - Pane {} ({}): {} — {} [branch: {}]",
+                pane_num, theme, config::role_short(r),
+                if t.len() > 60 { &t[..60] } else { t },
+                if b.is_empty() { "none" } else { b }
+            ));
+        }
+    }
+
+    if siblings.is_empty() {
+        String::new()
+    } else {
+        format!("## Active Sibling Agents (same project)\n{}\n\n", siblings.join("\n"))
+    }
 }
 
 /// Check if preamble exists for a pane

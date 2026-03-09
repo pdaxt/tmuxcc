@@ -600,7 +600,7 @@ pub async fn auto_cycle(app: &App) -> String {
                 let project_path = crate::config::resolve_project_path(&task.project);
                 let window_name = format!("{}-{}", task.role, task.id.chars().rev().take(6).collect::<String>().chars().rev().collect::<String>());
 
-                match crate::tmux::spawn_agent(&window_name, &project_path, &prompt) {
+                match crate::tmux::spawn_agent(&window_name, &project_path, &prompt, &[], true) {
                     Ok(agent) => {
                         let _ = queue::mark_running(&task.id, 0); // 0 = tmux mode
                         let _ = queue::set_tmux_target(&task.id, &agent.target);
@@ -638,6 +638,7 @@ pub async fn auto_cycle(app: &App) -> String {
                             role: Some(task.role.clone()),
                             task: Some(task.task.clone()),
                             prompt: Some(prompt),
+                            autonomous: None,
                         }).await;
 
                         actions.push(serde_json::json!({

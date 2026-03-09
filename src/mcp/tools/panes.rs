@@ -57,11 +57,24 @@ pub async fn spawn(app: &App, req: SpawnRequest) -> String {
     // Register machine identity
     let machine_id = machine::register(pane_num);
 
+    // Environment variables for the agent
+    let env_vars = vec![
+        ("P".to_string(), pane_num.to_string()),
+        ("DX_PANE".to_string(), pane_num.to_string()),
+        ("DX_THEME".to_string(), theme.to_string()),
+        ("DX_PROJECT".to_string(), project_name.clone()),
+        ("DX_ROLE".to_string(), role.clone()),
+        ("MACHINE_IP".to_string(), machine_id.ip.clone()),
+        ("MACHINE_HOSTNAME".to_string(), machine_id.hostname.clone()),
+        ("MACHINE_MAC".to_string(), machine_id.mac.clone()),
+    ];
+
     let task_prompt = format!("{}\n\n{}", task, if prompt.is_empty() { "" } else { &prompt });
+    let autonomous = req.autonomous.unwrap_or(true);
 
     // Spawn via tmux — creates a visible window the user can attach to
     let window_name = format!("dx-{}-{}", pane_num, config::theme_name(pane_num).to_lowercase());
-    let tmux_result = tmux::spawn_agent(&window_name, &spawn_cwd, &task_prompt);
+    let tmux_result = tmux::spawn_agent(&window_name, &spawn_cwd, &task_prompt, &env_vars, autonomous);
 
     let (tmux_status, tmux_target) = match &tmux_result {
         Ok(agent) => ("tmux_spawned".to_string(), Some(agent.target.clone())),
@@ -241,6 +254,7 @@ pub async fn restart(app: &App, req: RestartRequest) -> String {
         role: Some(pane_data.role),
         task: Some(pane_data.task),
         prompt: None,
+        autonomous: None,
     }).await
 }
 
@@ -357,6 +371,7 @@ pub async fn assign(app: &App, req: AssignRequest) -> String {
         role: Some(role.clone()),
         task: Some(task),
         prompt: Some(prompt),
+        autonomous: None,
     }).await;
 
     let mut pane_data = app.state.get_pane(pane_num).await;
@@ -400,6 +415,7 @@ pub async fn assign_adhoc(app: &App, req: AssignAdhocRequest) -> String {
         role: req.role.or(Some("developer".into())),
         task: Some(req.task),
         prompt: None,
+        autonomous: None,
     }).await
 }
 

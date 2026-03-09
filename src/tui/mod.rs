@@ -224,7 +224,7 @@ async fn execute_command(app: &App, cmd: TuiCommand) -> TuiResult {
         TuiCommand::Spawn { pane, project, role, task } => {
             let desc = format!("Spawn P{} {}", pane, project);
             let result = tools::spawn(app, types::SpawnRequest {
-                pane, project, role, task, prompt: None,
+                pane, project, role, task, prompt: None, autonomous: None,
             }).await;
             let success = !result.contains("\"error\"") && !result.contains("Error");
             TuiResult { description: desc, success, message: result }

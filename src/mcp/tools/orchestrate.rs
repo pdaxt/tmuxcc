@@ -89,6 +89,7 @@ pub async fn orchestrate(app: &App, req: OrchestrateRequest) -> String {
                 role: Some(planned_task.role.clone()),
                 task: Some(planned_task.task.clone()),
                 prompt: Some(planned_task.prompt.clone()),
+                autonomous: None,
             }).await;
 
             spawned.push(serde_json::json!({

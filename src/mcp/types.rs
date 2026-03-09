@@ -13,6 +13,9 @@ pub struct SpawnRequest {
     pub task: Option<String>,
     #[schemars(description = "Optional initial prompt to send after launch")]
     pub prompt: Option<String>,
+    #[serde(default)]
+    #[schemars(description = "Run with --dangerously-skip-permissions (default: true)")]
+    pub autonomous: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]

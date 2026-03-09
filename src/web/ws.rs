@@ -293,7 +293,7 @@ async fn handle_client_command(app: &App, cmd: &Value) -> Value {
                 return json!({"error": "pane and project required"});
             }
             let result = tools::spawn(app, types::SpawnRequest {
-                pane, project, role, task, prompt: None,
+                pane, project, role, task, prompt: None, autonomous: None,
             }).await;
             serde_json::from_str(&result).unwrap_or(json!({"raw": result}))
         }

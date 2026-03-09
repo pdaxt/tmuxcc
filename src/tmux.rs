@@ -72,12 +72,26 @@ pub fn send_command(target: &str, cmd: &str) -> Result<()> {
 
 /// Spawn a Claude agent in a new tmux window.
 /// Returns the TmuxAgent with target info.
+///
+/// `env_vars` are exported before running claude (e.g. P=3, MACHINE_IP, etc.)
+/// `autonomous` controls whether --dangerously-skip-permissions is used.
 pub fn spawn_agent(
     window_name: &str,
     project_path: &str,
     prompt: &str,
+    env_vars: &[(String, String)],
+    autonomous: bool,
 ) -> Result<TmuxAgent> {
     let agent = create_window(window_name)?;
+
+    // Export environment variables
+    if !env_vars.is_empty() {
+        let exports: Vec<String> = env_vars.iter()
+            .map(|(k, v)| format!("export {}={}", k, shell_escape(v)))
+            .collect();
+        send_command(&agent.target, &exports.join(" && "))?;
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 
     // cd to project directory
     send_command(&agent.target, &format!("cd {}", shell_escape(project_path)))?;
@@ -88,10 +102,21 @@ pub fn spawn_agent(
     // Build the claude command — escape the prompt for shell
     let claude_bin = resolve_claude_binary();
     let escaped_prompt = prompt.replace('\'', "'\\''");
-    let cmd = format!("{} --dangerously-skip-permissions -p '{}'", claude_bin, escaped_prompt);
+    let perms_flag = if autonomous { " --dangerously-skip-permissions" } else { "" };
+    let cmd = format!("{}{} -p '{}'", claude_bin, perms_flag, escaped_prompt);
     send_command(&agent.target, &cmd)?;
 
     Ok(agent)
+}
+
+/// Check if a tmux pane/window target exists.
+/// Uses `tmux display-message` which validates the full target (session:window.pane).
+pub fn pane_exists(target: &str) -> bool {
+    Command::new("tmux")
+        .args(["display-message", "-t", target, "-p", "#{pane_id}"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 /// Capture the current screen content of a tmux pane.
