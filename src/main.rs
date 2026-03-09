@@ -23,7 +23,6 @@ mod scanner;
 mod audit;
 mod factory;
 mod screen;
-#[allow(dead_code)]
 mod tmux;
 
 use std::sync::Arc;
@@ -89,7 +88,7 @@ async fn main() -> anyhow::Result<()> {
                     eprintln!("Web server error: {}", e);
                 }
             });
-            engine::start_background_tasks().await;
+            engine::start_background_tasks(Some(Arc::clone(&application.state))).await;
 
             let tui_app = application;
             let handle = std::thread::spawn(move || {
@@ -130,8 +129,8 @@ async fn run_mcp_mode(app: Arc<app::App>, web_port: u16, no_web: bool) -> anyhow
         tracing::info!("Web dashboard at http://localhost:{}", web_port);
     }
 
-    // Background engine: dead agent reaper, lock expiry, data retention
-    engine::start_background_tasks().await;
+    // Background engine: dead agent reaper, lock expiry, data retention, reconciler
+    engine::start_background_tasks(Some(Arc::clone(&app.state))).await;
 
     // Background auto-cycle timer — reads interval from config, runs auto_cycle periodically
     let cycle_app = Arc::clone(&app);

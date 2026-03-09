@@ -24,17 +24,29 @@ pub fn truncate(s: &str, max: usize) -> String {
     }
 }
 
-/// Save agent output to file before killing PTY (prevents irreversible output loss)
+/// Save agent output to file before killing (prevents irreversible output loss)
 pub fn save_agent_output(app: &App, pane_num: u8, reason: &str) -> Option<String> {
-    let pty = app.pty_lock();
-    if !pty.has_agent(pane_num) {
-        return None;
-    }
-    let output = pty.last_output(pane_num, 200).unwrap_or_default();
-    let screen = pty.screen_text(pane_num).unwrap_or_default();
-    drop(pty);
+    // Try tmux first by checking state synchronously via blocking_read (this runs in sync context)
+    let state = app.state.blocking_read();
+    let tmux_target = state.panes.get(&pane_num.to_string())
+        .and_then(|p| p.tmux_target.clone());
+    drop(state);
 
-    if output.is_empty() && screen.is_empty() {
+    let output = if let Some(ref target) = tmux_target {
+        crate::tmux::capture_output(target)
+    } else {
+        // PTY fallback
+        let pty = app.pty_lock();
+        if !pty.has_agent(pane_num) {
+            return None;
+        }
+        let o = pty.last_output(pane_num, 200).unwrap_or_default();
+        let s = pty.screen_text(pane_num).unwrap_or_default();
+        drop(pty);
+        if !s.trim().is_empty() { s } else { o }
+    };
+
+    if output.trim().is_empty() {
         return None;
     }
 
@@ -44,8 +56,8 @@ pub fn save_agent_output(app: &App, pane_num: u8, reason: &str) -> Option<String
     let path = dir.join(&filename);
 
     let content = format!(
-        "=== DX Terminal Output Log ===\nPane: {}\nReason: {}\nTimestamp: {}\n\n=== Screen ===\n{}\n\n=== Last 200 Lines ===\n{}\n",
-        pane_num, reason, state::now(), screen, output
+        "=== DX Terminal Output Log ===\nPane: {}\nReason: {}\nTimestamp: {}\n\n=== Output ===\n{}\n",
+        pane_num, reason, state::now(), output
     );
     let _ = std::fs::write(&path, &content);
     Some(path.to_string_lossy().to_string())
@@ -53,12 +65,23 @@ pub fn save_agent_output(app: &App, pane_num: u8, reason: &str) -> Option<String
 
 /// Extract meaningful result from agent output (PR URL, commit hash, etc.)
 pub fn extract_result(app: &App, pane_num: u8) -> String {
-    let pty = app.pty_lock();
-    let output = pty.last_output(pane_num, 50).unwrap_or_default();
-    let screen = pty.screen_text(pane_num).unwrap_or_default();
-    drop(pty);
+    // Try tmux first
+    let state = app.state.blocking_read();
+    let tmux_target = state.panes.get(&pane_num.to_string())
+        .and_then(|p| p.tmux_target.clone());
+    drop(state);
 
-    let text = if !screen.trim().is_empty() { &screen } else { &output };
+    let text_owned = if let Some(ref target) = tmux_target {
+        crate::tmux::capture_output(target)
+    } else {
+        let pty = app.pty_lock();
+        let output = pty.last_output(pane_num, 50).unwrap_or_default();
+        let screen = pty.screen_text(pane_num).unwrap_or_default();
+        drop(pty);
+        if !screen.trim().is_empty() { screen } else { output }
+    };
+
+    let text = &text_owned;
     let mut results = Vec::new();
 
     for line in text.lines() {

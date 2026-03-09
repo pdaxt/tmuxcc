@@ -1,10 +1,26 @@
 pub mod health;
 pub mod reaper;
+pub mod reconcile;
 pub mod retention;
 
 /// Spawn background maintenance tasks alongside the MCP server.
 /// Uses coordination_db() per-call (no shared Db struct needed).
-pub async fn start_background_tasks() {
+pub async fn start_background_tasks(state: Option<std::sync::Arc<crate::state::StateManager>>) {
+    // Startup reconciliation: clear stale "active" panes
+    if let Some(ref s) = state {
+        reconcile::reconcile_on_startup(s).await;
+    }
+
+    // Tmux reconciler: check active agents every 10s
+    if let Some(s) = state.clone() {
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                reconcile::reconcile_active_panes(&s).await;
+            }
+        });
+    }
+
     // Reaper: detect dead agents every 120s
     tokio::spawn(async {
         loop {

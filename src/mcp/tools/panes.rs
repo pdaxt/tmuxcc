@@ -11,6 +11,7 @@ use crate::state::types::PaneState;
 use crate::workspace;
 use crate::queue;
 use crate::machine;
+use crate::tmux;
 use super::super::types::*;
 use super::helpers::*;
 
@@ -56,39 +57,22 @@ pub async fn spawn(app: &App, req: SpawnRequest) -> String {
     // Register machine identity
     let machine_id = machine::register(pane_num);
 
-    // Resolve claude binary to absolute path (avoids PATH issues in PTY)
-    let claude_bin = resolve_claude_binary();
-
-    let env_vars = vec![
-        ("P".to_string(), pane_num.to_string()),
-        ("MACHINE_IP".to_string(), machine_id.ip.clone()),
-        ("MACHINE_HOSTNAME".to_string(), machine_id.hostname.clone()),
-        ("MACHINE_MAC".to_string(), machine_id.mac.clone()),
-        ("MACHINE_PANE".to_string(), pane_num.to_string()),
-    ];
-
     let task_prompt = format!("{}\n\n{}", task, if prompt.is_empty() { "" } else { &prompt });
-    let claude_args = vec![
-        "--dangerously-skip-permissions",
-        "-p",
-        &task_prompt,
-    ];
 
-    let pty_result = {
-        let mut pty = app.pty_lock();
-        pty.spawn(pane_num, &claude_bin, &claude_args, &spawn_cwd, env_vars)
+    // Spawn via tmux — creates a visible window the user can attach to
+    let window_name = format!("dx-{}-{}", pane_num, config::theme_name(pane_num).to_lowercase());
+    let tmux_result = tmux::spawn_agent(&window_name, &spawn_cwd, &task_prompt);
+
+    let (tmux_status, tmux_target) = match &tmux_result {
+        Ok(agent) => ("tmux_spawned".to_string(), Some(agent.target.clone())),
+        Err(e) => (format!("tmux_error: {}", e), None),
     };
 
-    let pty_status = match &pty_result {
-        Ok(()) => "pty_spawned".to_string(),
-        Err(e) => format!("pty_error: {}", e),
-    };
-
-    if pty_result.is_err() {
+    if tmux_result.is_err() {
         if let Some(ref ws) = ws_path {
             let _ = workspace::remove_worktree(&project_path, ws);
         }
-        return format!("{{\"error\": \"PTY spawn failed: {}\"}}", pty_status);
+        return format!("{{\"error\": \"Tmux spawn failed: {}\"}}", tmux_status);
     }
 
     let pane_state = PaneState {
@@ -108,6 +92,7 @@ pub async fn spawn(app: &App, req: SpawnRequest) -> String {
         machine_ip: Some(machine_id.ip.clone()),
         machine_hostname: Some(machine_id.hostname.clone()),
         machine_mac: Some(machine_id.mac.clone()),
+        tmux_target: tmux_target.clone(),
     };
     app.state.set_pane(pane_num, pane_state).await;
     app.state.log_activity(
@@ -140,7 +125,8 @@ pub async fn spawn(app: &App, req: SpawnRequest) -> String {
         "project_path": project_path,
         "workspace": ws_path,
         "branch": ws_branch,
-        "pty": pty_status,
+        "tmux": tmux_status,
+        "tmux_target": tmux_target,
         "machine_ip": machine_id.ip,
         "machine_hostname": machine_id.hostname,
         "machine_mac": machine_id.mac,
@@ -161,13 +147,19 @@ pub async fn kill(app: &App, req: KillRequest) -> String {
 
     let output_log = save_agent_output(app, pane_num, &reason);
 
-    let pty_result = {
+    // Kill via tmux if we have a target, otherwise try PTY fallback
+    let kill_status = if let Some(ref target) = pane_data.tmux_target {
+        match tmux::kill_window(target) {
+            Ok(()) => "tmux_killed",
+            Err(_) => "tmux_no_window",
+        }
+    } else {
+        // Fallback: try PTY kill for legacy agents
         let mut pty = app.pty_lock();
-        pty.kill(pane_num)
-    };
-    let pty_status = match pty_result {
-        Ok(()) => "killed",
-        Err(_) => "no_pty",
+        match pty.kill(pane_num) {
+            Ok(()) => "pty_killed",
+            Err(_) => "no_process",
+        }
     };
 
     let mut git_info = serde_json::Value::Null;
@@ -206,6 +198,7 @@ pub async fn kill(app: &App, req: KillRequest) -> String {
     pane_state.machine_ip = None;
     pane_state.machine_hostname = None;
     pane_state.machine_mac = None;
+    pane_state.tmux_target = None;
     app.state.set_pane(pane_num, pane_state).await;
     app.state.log_activity(pane_num, "kill", &format!("Killed: {}", reason)).await;
 
@@ -215,7 +208,7 @@ pub async fn kill(app: &App, req: KillRequest) -> String {
         "status": "killed",
         "pane": pane_num,
         "reason": reason,
-        "pty": pty_status,
+        "kill_method": kill_status,
         "git": git_info,
         "output_log": output_log,
     }).to_string()
@@ -283,12 +276,19 @@ pub async fn reassign(app: &App, req: ReassignRequest) -> String {
             "NEW TASK: {}\nRole: {}\nProject: {}\nPlease acknowledge and begin working on this new task.",
             task, pane_data.role, pane_data.project
         );
-        let send_result = {
-            let mut pty = app.pty_lock();
-            pty.send_line(pane_num, &msg)
-        };
-        if let Err(e) = send_result {
-            tracing::warn!("Failed to send reassign message to pane {}: {}", pane_num, e);
+        // Send via tmux if available, otherwise PTY fallback
+        if let Some(ref target) = pane_data.tmux_target {
+            if let Err(e) = tmux::send_command(target, &msg) {
+                tracing::warn!("Failed to send reassign via tmux to pane {}: {}", pane_num, e);
+            }
+        } else {
+            let send_result = {
+                let mut pty = app.pty_lock();
+                pty.send_line(pane_num, &msg)
+            };
+            if let Err(e) = send_result {
+                tracing::warn!("Failed to send reassign message to pane {}: {}", pane_num, e);
+            }
         }
     }
 
@@ -403,7 +403,7 @@ pub async fn assign_adhoc(app: &App, req: AssignAdhocRequest) -> String {
     }).await
 }
 
-/// Execute os_collect logic — reads real PTY output
+/// Execute os_collect logic — reads tmux output (or PTY fallback)
 pub async fn collect(app: &App, req: CollectRequest) -> String {
     let pane_num = match config::resolve_pane(&req.pane) {
         Some(n) => n,
@@ -411,9 +411,58 @@ pub async fn collect(app: &App, req: CollectRequest) -> String {
     };
 
     let pane_data = app.state.get_pane(pane_num).await;
+
+    let git_info = if let Some(ws) = &pane_data.workspace_path {
+        let status = workspace::git_status(ws).unwrap_or_default();
+        let diff = workspace::git_diff(ws).unwrap_or_default();
+        serde_json::json!({
+            "branch": pane_data.branch_name,
+            "status": status,
+            "diff_stat": diff,
+        })
+    } else {
+        serde_json::json!(null)
+    };
+
+    // Prefer tmux capture if we have a target
+    if let Some(ref target) = pane_data.tmux_target {
+        let t = target.clone();
+        let output = tokio::task::spawn_blocking(move || tmux::capture_output(&t))
+            .await.unwrap_or_default();
+        let t2 = target.clone();
+        let done = tokio::task::spawn_blocking(move || tmux::check_done(&t2))
+            .await.unwrap_or(false);
+        let t3 = target.clone();
+        let error = tokio::task::spawn_blocking(move || tmux::check_error(&t3))
+            .await.unwrap_or(None);
+
+        let line_count = output.lines().count();
+        let display_output = truncate(&output, 3000);
+
+        if done && pane_data.status == "active" {
+            app.state.update_pane_status(pane_num, "done").await;
+        }
+
+        return serde_json::json!({
+            "pane": pane_num,
+            "theme": pane_data.theme,
+            "project": pane_data.project,
+            "task": truncate(&pane_data.task, 60),
+            "status": if done && pane_data.status == "active" { "done" } else { &pane_data.status },
+            "branch": pane_data.branch_name,
+            "tmux_target": target,
+            "running": !done,
+            "done": done,
+            "error": error,
+            "output": display_output,
+            "line_count": line_count,
+            "git": git_info,
+        }).to_string();
+    }
+
+    // Fallback: try PTY
     let state_snap = app.state.get_state_snapshot().await;
     let markers = state_snap.config.completion_markers.clone();
-
     let pty_info = {
         let pty = app.pty_lock();
         if pty.has_agent(pane_num) {
@@ -426,18 +475,6 @@ pub async fn collect(app: &App, req: CollectRequest) -> String {
         } else {
             None
         }
-    };
-
-    let git_info = if let Some(ws) = &pane_data.workspace_path {
-        let status = workspace::git_status(ws).unwrap_or_default();
-        let diff = workspace::git_diff(ws).unwrap_or_default();
-        serde_json::json!({
-            "branch": pane_data.branch_name,
-            "status": status,
-            "diff_stat": diff,
-        })
-    } else {
-        serde_json::json!(null)
     };
 
     if let Some((output, screen, running, health, line_count)) = pty_info {
@@ -479,9 +516,7 @@ pub async fn collect(app: &App, req: CollectRequest) -> String {
             "running": false,
             "done": done,
             "error": serde_json::Value::Null,
-            "done_marker": serde_json::Value::Null,
-            "exit_code": serde_json::Value::Null,
-            "output": format!("[No PTY] Pane {} - Status: {}", pane_num, pane_data.status),
+            "output": format!("[No agent] Pane {} - Status: {}", pane_num, pane_data.status),
             "line_count": 0,
             "git": git_info,
         }).to_string()
@@ -553,7 +588,10 @@ pub async fn complete(app: &App, req: CompleteRequest) -> String {
         );
     }
 
-    {
+    // Kill the agent process (tmux or PTY)
+    if let Some(ref target) = pane_data.tmux_target {
+        let _ = tmux::kill_window(target);
+    } else {
         let mut pty = app.pty_lock();
         let _ = pty.kill(pane_num);
     }
@@ -583,6 +621,7 @@ pub async fn complete(app: &App, req: CompleteRequest) -> String {
     pane_data.machine_ip = None;
     pane_data.machine_hostname = None;
     pane_data.machine_mac = None;
+    pane_data.tmux_target = None;
     app.state.set_pane(pane_num, pane_data.clone()).await;
     app.state.log_activity(pane_num, "complete", &format!("Done: {} ({} ACU)", task_display, acu)).await;
 

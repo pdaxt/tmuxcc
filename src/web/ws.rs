@@ -95,13 +95,20 @@ async fn build_full_snapshot(app: &App) -> Value {
     let mut panes = Vec::new();
     for i in 1..=max_panes {
         let ps = state.panes.get(&i.to_string());
-        let tmux_target = format!("claude6:{}.{}", (i - 1) / 3, (i - 1) % 3);
+        // Use tmux_target from state if available (set during spawn)
+        let tmux_target = ps
+            .and_then(|p| p.tmux_target.clone())
+            .unwrap_or_default();
 
         // Capture current terminal output via spawn_blocking (tmux is sync)
-        let target = tmux_target.clone();
-        let output = tokio::task::spawn_blocking(move || {
-            tmux::capture_output(&target)
-        }).await.unwrap_or_default();
+        let output = if !tmux_target.is_empty() {
+            let target = tmux_target.clone();
+            tokio::task::spawn_blocking(move || {
+                tmux::capture_output(&target)
+            }).await.unwrap_or_default()
+        } else {
+            String::new()
+        };
 
         let lines: Vec<&str> = output.lines().collect();
         let tail: String = lines.iter().rev().take(50).rev()
@@ -213,10 +220,12 @@ async fn poll_terminal_output(
         let mut active_panes: Vec<(u8, String)> = Vec::new();
         for i in 1..=max_panes {
             let ps = state.panes.get(&i.to_string());
-            let is_active = ps.map(|p| p.status == "active").unwrap_or(false);
-            if is_active {
-                let tmux_target = format!("claude6:{}.{}", (i - 1) / 3, (i - 1) % 3);
-                active_panes.push((i, tmux_target));
+            if let Some(p) = ps {
+                if p.status == "active" {
+                    if let Some(ref target) = p.tmux_target {
+                        active_panes.push((i, target.clone()));
+                    }
+                }
             }
         }
 
@@ -303,8 +312,12 @@ async fn handle_client_command(app: &App, cmd: &Value) -> Value {
             if pane == 0 || message.is_empty() {
                 return json!({"error": "pane (number) and message required"});
             }
-            // Send via tmux in spawn_blocking
-            let target = format!("claude6:{}.{}", (pane - 1) / 3, (pane - 1) % 3);
+            // Get tmux target from state
+            let pane_data = app.state.get_pane(pane).await;
+            let target = match pane_data.tmux_target {
+                Some(t) => t,
+                None => return json!({"error": format!("pane {} has no tmux target", pane)}),
+            };
             match tokio::task::spawn_blocking(move || {
                 tmux::send_command(&target, &message)
             }).await {
@@ -348,7 +361,11 @@ async fn handle_client_command(app: &App, cmd: &Value) -> Value {
             if pane == 0 {
                 return json!({"error": "pane number required"});
             }
-            let target = format!("claude6:{}.{}", (pane - 1) / 3, (pane - 1) % 3);
+            let pane_data = app.state.get_pane(pane).await;
+            let target = match pane_data.tmux_target {
+                Some(t) => t,
+                None => return json!({"pane": pane, "output": "", "lines": 0, "error": "no tmux target"}),
+            };
             let output = tokio::task::spawn_blocking(move || {
                 tmux::capture_output(&target)
             }).await.unwrap_or_default();

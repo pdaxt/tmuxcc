@@ -61,6 +61,9 @@ pub struct PaneState {
     pub machine_hostname: Option<String>,
     #[serde(default)]
     pub machine_mac: Option<String>,
+    /// tmux target pane (e.g. "claude6:11.1") — where the agent actually lives
+    #[serde(default)]
+    pub tmux_target: Option<String>,
 }
 
 fn default_idle() -> String {
@@ -86,6 +89,7 @@ impl Default for PaneState {
             machine_ip: None,
             machine_hostname: None,
             machine_mac: None,
+            tmux_target: None,
         }
     }
 }

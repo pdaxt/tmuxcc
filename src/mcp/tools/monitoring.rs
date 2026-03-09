@@ -19,9 +19,18 @@ pub async fn status(app: &App) -> String {
         pane_states.push((i, app.state.get_pane(i).await));
     }
 
-    let pty = app.pty_lock();
     let mut panes = Vec::new();
     for (i, pd) in &pane_states {
+        // Check liveness via tmux if available, otherwise PTY
+        let (is_running, line_count) = if let Some(ref target) = pd.tmux_target {
+            let output = crate::tmux::capture_output(target);
+            let done = crate::tmux::check_done(target);
+            (!done, output.lines().count())
+        } else {
+            let pty = app.pty_lock();
+            (pty.is_running(*i), pty.line_count(*i))
+        };
+
         panes.push(serde_json::json!({
             "pane": i,
             "theme": config::theme_name(*i),
@@ -37,24 +46,22 @@ pub async fn status(app: &App) -> String {
             "branch": pd.branch_name,
             "workspace": pd.workspace_path,
             "started_at": pd.started_at,
-            "pty_running": pty.is_running(*i),
-            "pty_active": pty.has_agent(*i),
-            "line_count": pty.line_count(*i),
-            "exit_code": pty.exit_code(*i),
+            "tmux_target": pd.tmux_target,
+            "running": is_running,
+            "line_count": line_count,
         }));
     }
-    drop(pty);
 
     let active = panes.iter().filter(|p| p["status"] == "active").count();
     let idle = panes.iter().filter(|p| {
         let s = p["status"].as_str().unwrap_or("");
         s == "idle" || s.is_empty()
     }).count();
-    let pty_count = panes.iter().filter(|p| p["pty_running"].as_bool().unwrap_or(false)).count();
+    let running = panes.iter().filter(|p| p["running"].as_bool().unwrap_or(false)).count();
 
     serde_json::json!({
         "panes": panes,
-        "summary": {"active": active, "idle": idle, "total": config::pane_count(), "pty_running": pty_count}
+        "summary": {"active": active, "idle": idle, "total": config::pane_count(), "running": running}
     }).to_string()
 }
 
@@ -70,9 +77,14 @@ pub async fn dashboard(app: &App, req: DashboardRequest) -> String {
     let state_snap = app.state.get_state_snapshot().await;
     let log: Vec<_> = state_snap.activity_log.iter().take(8).cloned().collect();
 
-    let pty = app.pty_lock();
     let mut panes = Vec::new();
     for (i, pd) in &pane_states {
+        let is_running = if let Some(ref target) = pd.tmux_target {
+            !crate::tmux::check_done(target)
+        } else {
+            let pty = app.pty_lock();
+            pty.is_running(*i)
+        };
         panes.push(serde_json::json!({
             "pane": i,
             "theme": config::theme_name(*i),
@@ -80,10 +92,9 @@ pub async fn dashboard(app: &App, req: DashboardRequest) -> String {
             "task": truncate(&pd.task, 30),
             "role": config::role_short(&pd.role),
             "status": pd.status,
-            "pty": pty.is_running(*i),
+            "running": is_running,
         }));
     }
-    drop(pty);
 
     let format = req.format.unwrap_or_else(|| "text".into());
     if format == "json" {
@@ -115,7 +126,7 @@ pub async fn dashboard(app: &App, req: DashboardRequest) -> String {
         format!("ACU: {}/{} ({}%)  Reviews: {}/{}  Bottleneck: {}",
             cap.acu_used, cap.acu_total, acu_pct, cap.reviews_used, cap.reviews_total, bn),
         String::new(),
-        " #  Theme   Project        Task                          Role  Status  PTY".into(),
+        " #  Theme   Project        Task                          Role  Status  Run".into(),
         " -  ------  -------------- ------------------------------ ----  ------  ---".into(),
     ];
     for p in &panes {
@@ -125,7 +136,7 @@ pub async fn dashboard(app: &App, req: DashboardRequest) -> String {
             p["task"].as_str().unwrap_or("--"),
             p["role"].as_str().unwrap_or("--"),
             p["status"].as_str().unwrap_or("idle"),
-            if p["pty"].as_bool().unwrap_or(false) { "Y" } else { "-" },
+            if p["running"].as_bool().unwrap_or(false) { "Y" } else { "-" },
         ));
     }
 
@@ -163,7 +174,7 @@ pub async fn logs(app: &App, req: LogsRequest) -> String {
     serde_json::to_string(&log).unwrap_or_else(|_| "[]".into())
 }
 
-/// Execute os_health logic — real PTY health checks
+/// Execute os_health logic — checks tmux or PTY health
 pub async fn health(app: &App) -> String {
     let state = app.state.get_state_snapshot().await;
     let stuck_mins = state.config.stuck_threshold_minutes;
@@ -174,24 +185,24 @@ pub async fn health(app: &App) -> String {
         pane_states.push((i, app.state.get_pane(i).await));
     }
 
-    let pty = app.pty_lock();
     let mut results = Vec::new();
     for (i, pd) in &pane_states {
-        let has_pty = pty.has_agent(*i);
+        // Check via tmux if target exists
+        if let Some(ref target) = pd.tmux_target {
+            let done = crate::tmux::check_done(target);
+            let error = crate::tmux::check_error(target);
+            let output = crate::tmux::capture_output(target);
+            let line_count = output.lines().count();
 
-        if has_pty {
-            let health = pty.check_health(*i, &markers);
-            let mut health_status = if health.error.is_some() {
+            let mut health_status = if error.is_some() {
                 "error"
-            } else if health.done {
+            } else if done {
                 "done"
-            } else if health.running {
-                "ok"
             } else {
-                "stopped"
+                "ok"
             };
 
-            if pd.status == "active" && health.running && !health.done {
+            if pd.status == "active" && !done && error.is_none() {
                 if let Some(started) = &pd.started_at {
                     if let Ok(start_dt) = NaiveDateTime::parse_from_str(started, "%Y-%m-%dT%H:%M:%S") {
                         let now = Local::now().naive_local();
@@ -209,42 +220,82 @@ pub async fn health(app: &App) -> String {
                 "theme_color": config::theme_fg(*i),
                 "status": pd.status,
                 "health": health_status,
-                "pty_running": health.running,
-                "has_output": health.has_output,
-                "error": health.error,
-                "exit_code": health.exit_code,
-                "done_marker": health.done_marker,
-                "line_count": pty.line_count(*i),
+                "running": !done,
+                "has_output": !output.trim().is_empty(),
+                "error": error,
+                "tmux_target": target,
+                "line_count": line_count,
             }));
         } else {
-            let health_status = match pd.status.as_str() {
-                "idle" | "" => "idle",
-                "active" => "no_pty",
-                "done" => "done",
-                "error" => "error",
-                _ => "unknown",
-            };
+            // PTY fallback or no agent
+            let pty = app.pty_lock();
+            let has_pty = pty.has_agent(*i);
 
-            results.push(serde_json::json!({
-                "pane": *i,
-                "theme": config::theme_name(*i),
-                "theme_color": config::theme_fg(*i),
-                "status": pd.status,
-                "health": health_status,
-                "pty_running": false,
-                "has_output": false,
-                "error": serde_json::Value::Null,
-                "done_marker": serde_json::Value::Null,
-                "line_count": 0,
-            }));
+            if has_pty {
+                let health = pty.check_health(*i, &markers);
+                let mut health_status = if health.error.is_some() {
+                    "error"
+                } else if health.done {
+                    "done"
+                } else if health.running {
+                    "ok"
+                } else {
+                    "stopped"
+                };
+
+                if pd.status == "active" && health.running && !health.done {
+                    if let Some(started) = &pd.started_at {
+                        if let Ok(start_dt) = NaiveDateTime::parse_from_str(started, "%Y-%m-%dT%H:%M:%S") {
+                            let now = Local::now().naive_local();
+                            let mins = (now - start_dt).num_minutes();
+                            if mins > (stuck_mins * 10) as i64 {
+                                health_status = "stuck";
+                            }
+                        }
+                    }
+                }
+
+                results.push(serde_json::json!({
+                    "pane": *i,
+                    "theme": config::theme_name(*i),
+                    "theme_color": config::theme_fg(*i),
+                    "status": pd.status,
+                    "health": health_status,
+                    "running": health.running,
+                    "has_output": health.has_output,
+                    "error": health.error,
+                    "exit_code": health.exit_code,
+                    "done_marker": health.done_marker,
+                    "line_count": pty.line_count(*i),
+                }));
+            } else {
+                let health_status = match pd.status.as_str() {
+                    "idle" | "" => "idle",
+                    "active" => "no_agent",
+                    "done" => "done",
+                    "error" => "error",
+                    _ => "unknown",
+                };
+
+                results.push(serde_json::json!({
+                    "pane": *i,
+                    "theme": config::theme_name(*i),
+                    "theme_color": config::theme_fg(*i),
+                    "status": pd.status,
+                    "health": health_status,
+                    "running": false,
+                    "has_output": false,
+                    "error": serde_json::Value::Null,
+                    "line_count": 0,
+                }));
+            }
         }
     }
-    drop(pty);
 
     let active = results.iter().filter(|r| r["status"] == "active").count();
     let stuck = results.iter().filter(|r| r["health"] == "stuck").count();
     let errors = results.iter().filter(|r| r["health"] == "error").count();
-    let pty_count = results.iter().filter(|r| r["pty_running"].as_bool().unwrap_or(false)).count();
+    let running = results.iter().filter(|r| r["running"].as_bool().unwrap_or(false)).count();
 
     serde_json::json!({
         "panes": results,
@@ -253,7 +304,7 @@ pub async fn health(app: &App) -> String {
             "stuck": stuck,
             "errors": errors,
             "idle": config::pane_count() as usize - active,
-            "pty_running": pty_count,
+            "running": running,
         }
     }).to_string()
 }
@@ -269,7 +320,6 @@ pub async fn monitor(app: &App, req: MonitorRequest) -> String {
         pane_states.push((i, app.state.get_pane(i).await));
     }
 
-    let pty = app.pty_lock();
     let mut panes = Vec::new();
     let mut alerts = Vec::new();
     let mut active_count = 0u32;
@@ -279,10 +329,6 @@ pub async fn monitor(app: &App, req: MonitorRequest) -> String {
     let mut stuck_count = 0u32;
 
     for (i, pd) in &pane_states {
-        let has_pty = pty.has_agent(*i);
-        let running = pty.is_running(*i);
-        let line_count = pty.line_count(*i);
-
         let mut health_status = match pd.status.as_str() {
             "active" => { active_count += 1; "active" },
             "done" => { done_count += 1; "done" },
@@ -292,36 +338,39 @@ pub async fn monitor(app: &App, req: MonitorRequest) -> String {
 
         let mut error_msg: Option<String> = None;
         let mut done_marker: Option<String> = None;
-        let mut exit_code: Option<i32> = None;
         let mut output_snippet = String::new();
+        let mut is_running = false;
+        let mut line_count = 0usize;
 
-        if has_pty {
-            let h = pty.check_health(*i, &markers);
-            exit_code = h.exit_code;
-            if h.error.is_some() {
+        // Check via tmux if target exists, otherwise PTY fallback
+        if let Some(ref target) = pd.tmux_target {
+            let tmux_done = crate::tmux::check_done(target);
+            let tmux_error = crate::tmux::check_error(target);
+            let tmux_output = crate::tmux::capture_output(target);
+            line_count = tmux_output.lines().count();
+            is_running = !tmux_done;
+
+            if let Some(err) = tmux_error {
                 health_status = "error";
-                error_msg = h.error.clone();
+                error_msg = Some(err.clone());
                 if pd.status == "active" { error_count += 1; active_count = active_count.saturating_sub(1); }
                 alerts.push(serde_json::json!({
                     "level": "error",
                     "pane": i,
                     "theme": config::theme_name(*i),
-                    "message": format!("Error detected: {}", h.error.as_deref().unwrap_or("unknown")),
+                    "message": format!("Error detected: {}", err),
                 }));
-            } else if h.done {
+            } else if tmux_done && pd.status == "active" {
                 health_status = "done";
-                done_marker = h.done_marker.clone();
-                if pd.status == "active" {
-                    alerts.push(serde_json::json!({
-                        "level": "info",
-                        "pane": i,
-                        "theme": config::theme_name(*i),
-                        "message": "Agent finished — ready for completion",
-                    }));
-                }
+                alerts.push(serde_json::json!({
+                    "level": "info",
+                    "pane": i,
+                    "theme": config::theme_name(*i),
+                    "message": "Agent finished — ready for completion",
+                }));
             }
 
-            if pd.status == "active" && running && !h.done && h.error.is_none() {
+            if pd.status == "active" && !tmux_done && error_msg.is_none() {
                 if let Some(started) = &pd.started_at {
                     if let Ok(start_dt) = NaiveDateTime::parse_from_str(started, "%Y-%m-%dT%H:%M:%S") {
                         let now = Local::now().naive_local();
@@ -341,9 +390,45 @@ pub async fn monitor(app: &App, req: MonitorRequest) -> String {
                 }
             }
 
-            if include_output && has_pty {
-                let screen = pty.screen_text(*i).unwrap_or_default();
-                output_snippet = truncate(&screen, 500);
+            if include_output {
+                output_snippet = truncate(&tmux_output, 500);
+            }
+        } else {
+            // PTY fallback
+            let pty = app.pty_lock();
+            let has_pty = pty.has_agent(*i);
+            is_running = pty.is_running(*i);
+            line_count = pty.line_count(*i);
+
+            if has_pty {
+                let h = pty.check_health(*i, &markers);
+                if h.error.is_some() {
+                    health_status = "error";
+                    error_msg = h.error.clone();
+                    if pd.status == "active" { error_count += 1; active_count = active_count.saturating_sub(1); }
+                    alerts.push(serde_json::json!({
+                        "level": "error",
+                        "pane": i,
+                        "theme": config::theme_name(*i),
+                        "message": format!("Error detected: {}", h.error.as_deref().unwrap_or("unknown")),
+                    }));
+                } else if h.done {
+                    health_status = "done";
+                    done_marker = h.done_marker.clone();
+                    if pd.status == "active" {
+                        alerts.push(serde_json::json!({
+                            "level": "info",
+                            "pane": i,
+                            "theme": config::theme_name(*i),
+                            "message": "Agent finished — ready for completion",
+                        }));
+                    }
+                }
+
+                if include_output {
+                    let screen = pty.screen_text(*i).unwrap_or_default();
+                    output_snippet = truncate(&screen, 500);
+                }
             }
         }
 
@@ -354,16 +439,14 @@ pub async fn monitor(app: &App, req: MonitorRequest) -> String {
             "role": config::role_short(&pd.role),
             "task": truncate(&pd.task, 50),
             "health": health_status,
-            "pty": running,
+            "running": is_running,
             "lines": line_count,
             "branch": pd.branch_name,
+            "tmux_target": pd.tmux_target,
         });
 
         if let Some(e) = &error_msg {
             pane_info["error"] = serde_json::json!(e);
-        }
-        if let Some(c) = exit_code {
-            pane_info["exit_code"] = serde_json::json!(c);
         }
         if let Some(d) = &done_marker {
             pane_info["done_marker"] = serde_json::json!(d);
@@ -383,7 +466,6 @@ pub async fn monitor(app: &App, req: MonitorRequest) -> String {
 
         panes.push(pane_info);
     }
-    drop(pty);
 
     let q = queue::load_queue();
     let q_pending = q.tasks.iter().filter(|t| t.status == queue::QueueStatus::Pending).count();
@@ -438,53 +520,56 @@ pub async fn monitor(app: &App, req: MonitorRequest) -> String {
     }).to_string()
 }
 
-/// os_watch — Tail a pane's PTY output with error analysis
+/// os_watch — Tail a pane's output with error analysis (tmux or PTY)
 pub async fn watch(app: &App, req: WatchRequest) -> String {
     let pane_num = match config::resolve_pane(&req.pane) {
         Some(n) => n,
         None => return super::helpers::json_err(&format!("Invalid pane: {}", req.pane)),
     };
-    let tail_lines = req.tail.unwrap_or(30);
+    let _tail_lines = req.tail.unwrap_or(30);
     let analyze = req.analyze_errors.unwrap_or(true);
 
     let pd = app.state.get_pane(pane_num).await;
-    let state_snap = app.state.get_state_snapshot().await;
-    let markers = state_snap.config.completion_markers.clone();
 
-    let pty = app.pty_lock();
-    if !pty.has_agent(pane_num) {
+    // Get output from tmux or PTY
+    let (display, running, done) = if let Some(ref target) = pd.tmux_target {
+        let output = crate::tmux::capture_output(target);
+        let is_done = crate::tmux::check_done(target);
+        (output, !is_done, is_done)
+    } else {
+        let state_snap = app.state.get_state_snapshot().await;
+        let markers = state_snap.config.completion_markers.clone();
+        let pty = app.pty_lock();
+        if !pty.has_agent(pane_num) {
+            drop(pty);
+            return serde_json::json!({
+                "pane": pane_num,
+                "theme": config::theme_name(pane_num),
+                "status": pd.status,
+                "project": pd.project,
+                "task": pd.task,
+                "branch": pd.branch_name,
+                "running": false,
+                "phase": if pd.status == "idle" { "idle" } else { "unknown" },
+                "line_count": 0,
+                "done": false,
+                "error_count": 0,
+                "warning_count": 0,
+                "errors": [],
+                "warnings": [],
+                "output": format!("[No agent] Pane {} is {}", pane_num, pd.status),
+            }).to_string();
+        }
+        let screen = pty.screen_text(pane_num).unwrap_or_default();
+        let output = pty.last_output(pane_num, _tail_lines).unwrap_or_default();
+        let r = pty.is_running(pane_num);
+        let h = pty.check_health(pane_num, &markers);
         drop(pty);
-        return serde_json::json!({
-            "pane": pane_num,
-            "theme": config::theme_name(pane_num),
-            "theme_color": config::theme_fg(pane_num),
-            "status": pd.status,
-            "project": pd.project,
-            "role": pd.role,
-            "task": pd.task,
-            "branch": pd.branch_name,
-            "pty_running": false,
-            "pty_active": false,
-            "phase": if pd.status == "idle" { "idle" } else { "unknown" },
-            "line_count": 0,
-            "runtime_mins": serde_json::Value::Null,
-            "done": false,
-            "error_count": 0,
-            "warning_count": 0,
-            "errors": [],
-            "warnings": [],
-            "output": format!("[No PTY] Pane {} is {}", pane_num, pd.status),
-        }).to_string();
-    }
+        let d = if !screen.trim().is_empty() { screen } else { output };
+        (d, r, h.done)
+    };
 
-    let screen = pty.screen_text(pane_num).unwrap_or_default();
-    let output = pty.last_output(pane_num, tail_lines).unwrap_or_default();
-    let running = pty.is_running(pane_num);
-    let health = pty.check_health(pane_num, &markers);
-    let line_count = pty.line_count(pane_num);
-    drop(pty);
-
-    let display = if !screen.trim().is_empty() { &screen } else { &output };
+    let line_count = display.lines().count();
 
     let mut errors_found = Vec::new();
     let mut warnings_found = Vec::new();
@@ -529,7 +614,7 @@ pub async fn watch(app: &App, req: WatchRequest) -> String {
         None
     };
 
-    let phase = if health.done {
+    let phase = if done {
         "completed"
     } else if display.contains("Thinking") || display.contains("thinking") {
         "thinking"
@@ -553,14 +638,13 @@ pub async fn watch(app: &App, req: WatchRequest) -> String {
         "task": truncate(&pd.task, 80),
         "status": pd.status,
         "branch": pd.branch_name,
-        "pty_running": running,
+        "tmux_target": pd.tmux_target,
+        "running": running,
         "phase": phase,
         "runtime_mins": runtime_mins,
         "line_count": line_count,
-        "done": health.done,
-        "done_marker": health.done_marker,
-        "exit_code": health.exit_code,
-        "output": truncate(display, 4000),
+        "done": done,
+        "output": truncate(&display, 4000),
         "errors": errors_found,
         "warnings": warnings_found,
         "error_count": errors_found.len(),
@@ -578,10 +662,13 @@ pub async fn project_status(app: &App, req: ProjectStatusRequest) -> String {
     for i in 1..=config::pane_count() {
         let pd = app.state.get_pane(i).await;
         if pd.project.to_lowercase().contains(&project_lower) || pd.project_path.to_lowercase().contains(&project_lower) {
-            let pty = app.pty_lock();
-            let running = pty.is_running(i);
-            let lines = pty.line_count(i);
-            drop(pty);
+            let (running, lines) = if let Some(ref target) = pd.tmux_target {
+                let output = crate::tmux::capture_output(target);
+                (!crate::tmux::check_done(target), output.lines().count())
+            } else {
+                let pty = app.pty_lock();
+                (pty.is_running(i), pty.line_count(i))
+            };
 
             project_panes.push(serde_json::json!({
                 "pane": i,
@@ -590,7 +677,8 @@ pub async fn project_status(app: &App, req: ProjectStatusRequest) -> String {
                 "task": truncate(&pd.task, 60),
                 "status": pd.status,
                 "branch": pd.branch_name,
-                "pty_running": running,
+                "tmux_target": pd.tmux_target,
+                "running": running,
                 "lines": lines,
                 "acu": pd.acu_spent,
             }));
