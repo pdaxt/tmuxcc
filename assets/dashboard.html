@@ -114,21 +114,21 @@ select:hover{border-color:var(--border-bright)}
 @media(max-width:900px){.pane-grid{grid-template-columns:repeat(2,1fr)}}
 
 .pane-card{
-  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  border:1px solid var(--border);border-radius:var(--radius);
   padding:12px 14px;cursor:pointer;position:relative;overflow:hidden;
   transition:var(--transition);border-left:3px solid transparent;
 }
-.pane-card:hover{border-color:var(--border-bright);transform:translateY(-1px);box-shadow:var(--shadow)}
-.pane-card.selected{box-shadow:0 0 0 2px var(--blue),var(--shadow)}
+.pane-card:hover{transform:translateY(-1px);box-shadow:0 4px 20px color-mix(in srgb,var(--pane-color,var(--blue)) 15%,transparent),var(--shadow)}
+.pane-card.selected{box-shadow:0 0 0 2px var(--pane-color,var(--blue)),var(--shadow)}
 .pane-card.idle{opacity:.35;padding:8px 14px}
 .pane-card.idle:hover{opacity:.6}
-.pane-card.has-error{box-shadow:inset 0 0 20px rgba(255,92,92,.05)}
-.pane-card.is-done{box-shadow:inset 0 0 20px rgba(68,217,140,.05)}
+.pane-card.has-error{box-shadow:inset 0 0 20px rgba(255,92,92,.1)}
+.pane-card.is-done{box-shadow:inset 0 0 20px rgba(68,217,140,.1)}
 
 /* Shimmer for active agents */
 .pane-card.active::before{
   content:'';position:absolute;top:0;left:-100%;width:60%;height:100%;
-  background:linear-gradient(90deg,transparent,rgba(77,166,255,.03),transparent);
+  background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--pane-color,var(--blue)) 6%,transparent),transparent);
   animation:shimmer 3s infinite;
 }
 @keyframes shimmer{0%{left:-100%}100%{left:200%}}
@@ -514,13 +514,13 @@ function renderPanes(){
     if(activePaneNum===p.pane)cls+=' selected';
 
     if(!isActive&&!hasProject){
-      html+=`<div class="pane-card idle" style="border-left-color:${color}" onclick="openPanel(${p.pane})">
+      html+=`<div class="pane-card idle" style="--pane-color:${color};border-left-color:${color};background:linear-gradient(135deg,${color}08 0%,var(--surface) 60%);border-color:${color}20" onclick="openPanel(${p.pane})">
         <div class="pane-top" style="margin-bottom:0">
           <span class="pane-num" style="background:${color}">${p.pane}</span>
           <span class="pane-status s-idle">available</span>
         </div></div>`;
     } else {
-      html+=`<div class="pane-card ${cls}" style="border-left-color:${color}" onclick="openPanel(${p.pane})">
+      html+=`<div class="pane-card ${cls}" style="--pane-color:${color};border-left-color:${color};background:linear-gradient(135deg,${color}15 0%,${color}05 30%,var(--surface) 100%);border-color:${color}30" onclick="openPanel(${p.pane})">
         <div class="pane-top">
           <span class="pane-num" style="background:${color}">${p.pane}</span>
           <span class="pane-status ${sc}">${h}</span>
