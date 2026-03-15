@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "project": {
+    "name": "dx-terminal",
+    "path": "/Users/pran/Projects/dx-terminal",
+    "company": null,
+    "program": null,
+    "workspace": null
+  },
+  "defaults": {
+    "deployment_model": "hybrid_saas",
+    "autonomy_mode": "guarded_auto",
+    "runtime_substrate": "custom_pty",
+    "runtime_adapter": "pty_native_adapter",
+    "capability_source": "dx_registry",
+    "governance_model": "structured_council",
+    "research_mode": "formal_debate",
+    "docs_required": true,
+    "stages": [
+      "planned",
+      "discovery",
+      "design",
+      "build",
+      "test",
+      "done"
+    ],
+    "v1_domains": [
+      "delivery",
+      "design",
+      "documentation",
+      "qa",
+      "security",
+      "compliance"
+    ]
+  },
+  "adoptions": [],
+  "debates": [],
+  "sessions": [
+    {
+      "id": "health-check-scheduler",
+      "status": "planned",
+      "role": "design",
+      "priority": "medium",
+      "provider": "claude",
+      "model": "claude-opus-4.6",
+      "autonomy_level": "guarded_auto",
+      "objective": "Health check scheduler rendering",
+      "expected_outputs": [
+        "health_check"
+      ],
+      "allowed_capabilities": [
+        "analysis",
+        "docs"
+      ],
+      "allowed_repos": [
+        "/Users/pran/Projects/dx-terminal"
+      ],
+      "allowed_paths": [
+        "/Users/pran/Projects/dx-terminal"
+      ],
+      "workspace_path": "/Users/pran/Projects/dx-terminal",
+      "branch_name": null,
+      "browser_port": null,
+      "pane": null,
+      "runtime_adapter": "pty_native_adapter",
+      "tmux_target": null,
+      "feature_id": "HC.1",
+      "stage": "design",
+      "supervisor_session_id": null,
+      "escalation_policy": null,
+      "policy_violations": [],
+      "last_error": null,
+      "launch_claimed_by": null,
+      "launch_claimed_at": null,
+      "launch_claim_id": null,
+      "created_at": "2026-03-15T14:00:53",
+      "updated_at": "2026-03-15T14:00:53"
+    }
+  ],
+  "work_orders": [],
+  "workflow_runs": [],
+  "scheduler_runs": [],
+  "updated_at": "2026-03-15T14:00:53"
+}
